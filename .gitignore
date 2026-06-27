@@ -1,0 +1,22 @@
+# Built artifacts
+/build
+/app/build
+*.apk
+*.aar
+
+# IDEs and Editors
+.idea/
+.kotlin/
+*.iml
+.gradle/
+/local.properties
+captures/
+.externalNativeBuild
+.cxx
+
+# System files
+.DS_Store
+Thumbs.db
+
+# User Assets & Cache
+assets/
