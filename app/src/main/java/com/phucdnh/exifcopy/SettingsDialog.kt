@@ -101,7 +101,7 @@ fun SettingsDialog(
                         Text("Định dạng ảnh đầu ra (Output Format)", style = MaterialTheme.typography.titleMedium)
                         Spacer(modifier = Modifier.height(8.dp))
                         
-                        val formats = listOf("ORIGINAL", "JPG", "JPEG", "PNG")
+                        val formats = listOf("ORIGINAL", "JPG", "JPEG", "PNG", "WEBP_LOSSY", "WEBP_LOSSLESS")
                         Column {
                             formats.forEach { format ->
                                 Row(
@@ -118,6 +118,8 @@ fun SettingsDialog(
                                     Spacer(modifier = Modifier.width(8.dp))
                                     val displayName = when (format) {
                                         "ORIGINAL" -> "Giữ nguyên định dạng gốc"
+                                        "WEBP_LOSSY" -> "WebP (Lossy - Có hao hụt)"
+                                        "WEBP_LOSSLESS" -> "WebP (Lossless - Không hao hụt)"
                                         else -> format
                                     }
                                     Text(displayName)

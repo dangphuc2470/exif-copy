@@ -1,0 +1,14 @@
+appId: com.phucdnh.exifcopy
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "ExifCopy Expressive"
+    timeout: 5000
+- assertVisible: "ExifCopy Expressive"
+- assertVisible: "Sao chép EXIF"
+- assertVisible: "Xóa nhãn AI"
+- tapOn: "Xóa nhãn AI"
+- assertVisible: "Ảnh Cần Xóa Nhãn AI"
+- tapOn: "Sao chép EXIF"
+- assertVisible: "Ảnh Nguồn (A)"
+- assertVisible: "Ảnh Đích (B)"

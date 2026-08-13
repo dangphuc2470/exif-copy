@@ -17,10 +17,19 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.window.DialogWindowProvider
+import android.view.WindowManager
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -72,9 +81,14 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
+            var previewImageUri by remember { mutableStateOf<Uri?>(null) }
+            var onDeleteCurrentPreview: (() -> Unit)? by remember { mutableStateOf(null) }
+
             MyApplicationTheme {
                 Scaffold(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .blur(if (previewImageUri != null) 24.dp else 0.dp),
                     topBar = {
                         TopAppBar(
                             title = {
@@ -91,12 +105,31 @@ class MainActivity : ComponentActivity() {
                     }
                 ) { innerPadding ->
                     val sharedUris by sharedUrisState
+
                     MainScreen(
                         sharedUris = sharedUris,
                         onClearSharedUris = { sharedUrisState.value = emptyList() },
+                        previewImageUri = previewImageUri,
+                        onPreviewImageChange = { previewImageUri = it },
+                        onRegisterDeleteCallback = { callback -> onDeleteCurrentPreview = callback },
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(innerPadding)
+                    )
+                }
+
+                previewImageUri?.let { uri ->
+                    ImagePreviewDialog(
+                        uri = uri,
+                        onDismiss = { previewImageUri = null },
+                        onDelete = {
+                            val uriToDelete = previewImageUri
+                            if (uriToDelete != null) {
+                                sharedUrisState.value = sharedUrisState.value.filter { it != uriToDelete }
+                            }
+                            onDeleteCurrentPreview?.invoke()
+                            previewImageUri = null
+                        }
                     )
                 }
             }
@@ -148,6 +181,9 @@ class MainActivity : ComponentActivity() {
 fun MainScreen(
     sharedUris: List<Uri>,
     onClearSharedUris: () -> Unit,
+    previewImageUri: Uri?,
+    onPreviewImageChange: (Uri?) -> Unit,
+    onRegisterDeleteCallback: ((() -> Unit) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -157,19 +193,47 @@ fun MainScreen(
     val sourceImages = remember { mutableStateListOf<ImageItem>() }
     val targetImages = remember { mutableStateListOf<ImageItem>() }
 
+    // Register delete callback when previewImageUri changes
+    LaunchedEffect(previewImageUri) {
+        if (previewImageUri != null) {
+            onRegisterDeleteCallback?.invoke {
+                sourceImages.removeAll { it.uri == previewImageUri }
+                targetImages.removeAll { it.uri == previewImageUri }
+            }
+        }
+    }
+
     // Multi-selection states
     val selectedSourceIds = remember { mutableStateListOf<String>() }
     val selectedTargetIds = remember { mutableStateListOf<String>() }
 
     // Navigation Tab state
-    var activeTab by remember { mutableStateOf(0) } // 0: Sao chép EXIF, 1: Xóa nhãn AI
+    var activeTab by remember { mutableStateOf(0) } // Default to Tab 0: Sao chép Exif
+
+    // Handle incoming shared URIs from external apps without clearing existing images
+    LaunchedEffect(sharedUris) {
+        if (sharedUris.isNotEmpty()) {
+            sharedUris.forEach { uri ->
+                if (!targetImages.any { it.uri == uri }) {
+                    targetImages.add(ImageItem(uri))
+                }
+                if (!sourceImages.any { it.uri == uri }) {
+                    sourceImages.add(ImageItem(uri))
+                }
+            }
+            onClearSharedUris()
+        }
+    }
 
     // EXIF Settings and configurations
     var exifSettings by remember { mutableStateOf(ExifSettings()) }
-    var replaceOriginal by remember { mutableStateOf(false) }
+    var removeWatermark by remember { mutableStateOf(true) }
+    var watermarkMode by remember { mutableStateOf(GeminiWatermarkRemover.WatermarkMode.AI_MODEL) }
     var isProcessing by remember { mutableStateOf(false) }
     var processingMessage by remember { mutableStateOf("") }
     var showSettingsDialog by remember { mutableStateOf(false) }
+    var singleResultUri by remember { mutableStateOf<Uri?>(null) }
+    var showOpenImageDialog by remember { mutableStateOf(false) }
 
     // Drag-and-drop controller
     val controller = remember {
@@ -187,7 +251,7 @@ fun MainScreen(
 
     // Launcher to pick source images
     val pickSourceLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetMultipleContents()
+        contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         uris.forEach { uri ->
             if (!sourceImages.any { it.uri == uri }) {
@@ -198,7 +262,7 @@ fun MainScreen(
 
     // Launcher to pick target images
     val pickTargetLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetMultipleContents()
+        contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         uris.forEach { uri ->
             if (!targetImages.any { it.uri == uri }) {
@@ -211,6 +275,7 @@ fun MainScreen(
         modifier = modifier
             .background(MaterialTheme.colorScheme.background)
             .onGloballyPositioned { mainScreenWindowBounds = it.boundsInWindow() }
+            .blur(if (previewImageUri != null) 24.dp else 0.dp)
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -291,7 +356,7 @@ fun MainScreen(
                                     modifier = Modifier.weight(1f)
                                 )
                                 Button(
-                                    onClick = { pickSourceLauncher.launch("image/*") },
+                                    onClick = { pickSourceLauncher.launch(arrayOf("image/*")) },
                                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                                 ) {
                                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -339,7 +404,8 @@ fun MainScreen(
                                                 if (droppedOnTarget == true) {
                                                     selectedSourceIds.clear()
                                                 }
-                                            }
+                                            },
+                                            onPreview = { onPreviewImageChange(it) }
                                         )
                                     }
                                 }
@@ -415,7 +481,7 @@ fun MainScreen(
                                     modifier = Modifier.weight(1f)
                                 )
                                 Button(
-                                    onClick = { pickTargetLauncher.launch("image/*") },
+                                    onClick = { pickTargetLauncher.launch(arrayOf("image/*")) },
                                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                                 ) {
                                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -463,7 +529,8 @@ fun MainScreen(
                                                 if (droppedOnSource == false) {
                                                     selectedTargetIds.clear()
                                                 }
-                                            }
+                                            },
+                                            onPreview = { onPreviewImageChange(it) }
                                         )
                                     }
                                 }
@@ -477,39 +544,46 @@ fun MainScreen(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(
-                                checked = replaceOriginal,
-                                onCheckedChange = { replaceOriginal = it }
+                                checked = removeWatermark,
+                                onCheckedChange = { removeWatermark = it }
                             )
-                            Text("Ghi đè file gốc", style = MaterialTheme.typography.bodyMedium)
-                        }
+                            Text("Xóa Watermark", style = MaterialTheme.typography.bodyMedium)
 
-                        if (sourceImages.size == 1) {
-                            Text(
-                                "Chế độ: 1 nguồn -> Nhiều đích (Có Random)",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.secondary,
-                                fontWeight = FontWeight.Medium
-                            )
-                        } else if (sourceImages.isNotEmpty() && sourceImages.size == targetImages.size) {
-                            Text(
-                                "Chế độ: Sao chép 1-1 khớp vị trí",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Medium
-                            )
-                        } else if (sourceImages.isNotEmpty() && targetImages.isNotEmpty()) {
-                            Text(
-                                "Chế độ: Số lượng lệch (${sourceImages.size} vs ${targetImages.size})",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.error,
-                                fontWeight = FontWeight.Medium
-                            )
+                            if (removeWatermark) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                var expanded by remember { mutableStateOf(false) }
+
+                                Box {
+                                    OutlinedButton(
+                                        onClick = { expanded = true },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(32.dp)
+                                    ) {
+                                        Text(watermarkMode.displayName, fontSize = 11.sp)
+                                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    }
+                                    DropdownMenu(
+                                        expanded = expanded,
+                                        onDismissRequest = { expanded = false }
+                                    ) {
+                                        GeminiWatermarkRemover.WatermarkMode.values().forEach { mode ->
+                                            DropdownMenuItem(
+                                                text = { Text(mode.displayName, fontSize = 12.sp) },
+                                                onClick = {
+                                                    watermarkMode = mode
+                                                    expanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -531,10 +605,11 @@ fun MainScreen(
                             
                             // Clear old logs and start new log stream
                             ExifMetadataHelper.clearLog(context)
-                            ExifMetadataHelper.log(context, "Bắt đầu tiến trình sao chép EXIF cho ${targetImages.size} ảnh")
+                            ExifMetadataHelper.log(context, "Bắt đầu tiến trình sao chép EXIF cho ${targetImages.size} ảnh (Xóa Watermark=$removeWatermark, Mode=${watermarkMode.displayName})")
                             
                             scope.launch {
                                 var successCount = 0
+                                var lastOutputUri: Uri? = null
                                 val targetCopy = targetImages.toList()
                                 val sourceCopy = sourceImages.toList()
 
@@ -555,21 +630,24 @@ fun MainScreen(
                                             targetUri = targetItem.uri,
                                             settings = activeSettings,
                                             itemIndex = i,
-                                            replaceOriginal = replaceOriginal
+                                            replaceOriginal = false,
+                                            removeWatermark = removeWatermark,
+                                            watermarkMode = watermarkMode
                                         )
                                         if (outputUri != null) {
                                             successCount++
+                                            lastOutputUri = outputUri
                                         }
                                     }
                                 }
 
                                 isProcessing = false
-                                val resultMsg = if (replaceOriginal) {
-                                    "Đã cập nhật $successCount/${targetCopy.size} ảnh gốc thành công!"
-                                } else {
-                                    "Đã lưu mới $successCount/${targetCopy.size} ảnh vào thư mục Pictures/ExifCopy!"
-                                }
+                                val resultMsg = "Đã lưu $successCount/${targetCopy.size} ảnh mới vào thư mục Pictures/ExifCopy!"
                                 Toast.makeText(context, resultMsg, Toast.LENGTH_LONG).show()
+                                if (lastOutputUri != null) {
+                                    singleResultUri = lastOutputUri
+                                    showOpenImageDialog = true
+                                }
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
@@ -588,8 +666,8 @@ fun MainScreen(
                     // CONTAINER B: TARGET IMAGES (Chỉ chọn ảnh cần xóa nhãn)
                     Card(
                         modifier = Modifier
-                            .weight(1f)
                             .fillMaxWidth()
+                            .height(220.dp)
                             .border(
                                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                                 shape = CardDefaults.shape
@@ -616,7 +694,7 @@ fun MainScreen(
                                     modifier = Modifier.weight(1f)
                                 )
                                 Button(
-                                    onClick = { pickTargetLauncher.launch("image/*") },
+                                    onClick = { pickTargetLauncher.launch(arrayOf("image/*")) },
                                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                                 ) {
                                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -660,7 +738,8 @@ fun MainScreen(
                                             controller = controller,
                                             sourceBounds = Rect.Zero,
                                             targetBounds = Rect.Zero,
-                                            onDragEnded = { }
+                                            onDragEnded = { },
+                                            onPreview = { onPreviewImageChange(it) }
                                         )
                                     }
                                 }
@@ -668,20 +747,54 @@ fun MainScreen(
                         }
                     }
 
+                    Spacer(modifier = Modifier.weight(1f))
+
                     // SETTINGS & CONTROL BAR
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Checkbox(
-                            checked = replaceOriginal,
-                            onCheckedChange = { replaceOriginal = it }
-                        )
-                        Text("Ghi đè file gốc", style = MaterialTheme.typography.bodyMedium)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = removeWatermark,
+                                onCheckedChange = { removeWatermark = it }
+                            )
+                            Text("Xóa Watermark", style = MaterialTheme.typography.bodyMedium)
+
+                            if (removeWatermark) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                var expanded by remember { mutableStateOf(false) }
+
+                                Box {
+                                    OutlinedButton(
+                                        onClick = { expanded = true },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(32.dp)
+                                    ) {
+                                        Text(watermarkMode.displayName, fontSize = 11.sp)
+                                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    }
+                                    DropdownMenu(
+                                        expanded = expanded,
+                                        onDismissRequest = { expanded = false }
+                                    ) {
+                                        GeminiWatermarkRemover.WatermarkMode.values().forEach { mode ->
+                                            DropdownMenuItem(
+                                                text = { Text(mode.displayName, fontSize = 12.sp) },
+                                                onClick = {
+                                                    watermarkMode = mode
+                                                    expanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     // ACTION BUTTON (Full Width)
@@ -693,14 +806,14 @@ fun MainScreen(
                             }
 
                             isProcessing = true
-                            processingMessage = "Đang xóa nhãn Google AI..."
+                            processingMessage = if (removeWatermark) "Đang xóa nhãn AI & Watermark..." else "Đang xóa nhãn Google AI..."
                             
-                            // Clear old logs and start new log stream
                             ExifMetadataHelper.clearLog(context)
-                            ExifMetadataHelper.log(context, "Bắt đầu tiến trình xóa nhãn Google AI cho ${targetImages.size} ảnh")
+                            ExifMetadataHelper.log(context, "Bắt đầu tiến trình xóa nhãn Google AI cho ${targetImages.size} ảnh (Xóa Watermark=$removeWatermark, Mode=${watermarkMode.displayName})")
                             
                             scope.launch {
                                 var successCount = 0
+                                var lastOutputUri: Uri? = null
                                 val targetCopy = targetImages.toList()
 
                                 withContext(Dispatchers.IO) {
@@ -708,21 +821,24 @@ fun MainScreen(
                                         val outputUri = ExifMetadataHelper.cleanGoogleAiMetadata(
                                             context = context,
                                             targetUri = targetItem.uri,
-                                            replaceOriginal = replaceOriginal
+                                            replaceOriginal = false,
+                                            removeWatermark = removeWatermark,
+                                            watermarkMode = watermarkMode
                                         )
                                         if (outputUri != null) {
                                             successCount++
+                                            lastOutputUri = outputUri
                                         }
                                     }
                                 }
 
                                 isProcessing = false
-                                val resultMsg = if (replaceOriginal) {
-                                    "Đã làm sạch $successCount/${targetCopy.size} ảnh gốc thành công!"
-                                } else {
-                                    "Đã lưu mới $successCount/${targetCopy.size} ảnh làm sạch vào thư mục Pictures/ExifCopy!"
-                                }
+                                val resultMsg = "Đã lưu $successCount/${targetCopy.size} ảnh làm sạch vào thư mục Pictures/ExifCopy!"
                                 Toast.makeText(context, resultMsg, Toast.LENGTH_LONG).show()
+                                if (lastOutputUri != null) {
+                                    singleResultUri = lastOutputUri
+                                    showOpenImageDialog = true
+                                }
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
@@ -866,6 +982,100 @@ fun MainScreen(
                 }
             )
         }
+
+        // -----------------------------------------------------------------
+        // COMPLETION OPEN IMAGE DIALOG
+        // -----------------------------------------------------------------
+        if (showOpenImageDialog && singleResultUri != null) {
+            AlertDialog(
+                onDismissRequest = { showOpenImageDialog = false },
+                title = { Text("Xử lý hoàn tất!", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Đã lưu ảnh mới vào thư mục Pictures/ExifCopy!",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(220.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    onPreviewImageChange(singleResultUri)
+                                },
+                            shape = RoundedCornerShape(12.dp),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                AsyncImage(
+                                    model = singleResultUri,
+                                    contentDescription = "Output Preview",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Fit
+                                )
+                                Surface(
+                                    color = Color.Black.copy(alpha = 0.65f),
+                                    shape = RoundedCornerShape(topStart = 8.dp),
+                                    modifier = Modifier.align(Alignment.BottomEnd)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.ZoomIn, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Chạm để phóng to", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        try {
+                            val viewUri = if (singleResultUri?.scheme == "file" && singleResultUri?.path != null) {
+                                val file = java.io.File(singleResultUri?.path!!)
+                                androidx.core.content.FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.fileprovider",
+                                    file
+                                )
+                            } else {
+                                singleResultUri
+                            }
+
+                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(viewUri, "image/*")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            context.startActivity(Intent.createChooser(intent, "Xem ảnh"))
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Lỗi mở xem ảnh: ${e.message}", Toast.LENGTH_LONG).show()
+                        }
+                        showOpenImageDialog = false
+                    }) {
+                        Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Mở bằng app ngoài")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showOpenImageDialog = false }) {
+                        Text("Đóng")
+                    }
+                }
+            )
+        }
+
     }
 }
 
@@ -903,6 +1113,7 @@ fun EmptyContainerState(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ImageItemCard(
     item: ImageItem,
@@ -916,7 +1127,8 @@ fun ImageItemCard(
     controller: DragDropController,
     sourceBounds: Rect,
     targetBounds: Rect,
-    onDragEnded: (Boolean?) -> Unit
+    onDragEnded: (Boolean?) -> Unit,
+    onPreview: (Uri) -> Unit = {}
 ) {
     var dragStartOffset by remember { mutableStateOf(Offset.Zero) }
     var dragOffset by remember { mutableStateOf(Offset.Zero) }
@@ -927,39 +1139,10 @@ fun ImageItemCard(
 
     Card(
         modifier = Modifier
-            .width(100.dp)
+            .aspectRatio(1f)
             .fillMaxHeight()
-            .onGloballyPositioned { itemWindowBounds = it.boundsInWindow() }
-            .pointerInput(item) {
-                detectDragGesturesAfterLongPress(
-                    onDragStart = { offset ->
-                        dragStartOffset = offset
-                        dragOffset = Offset.Zero
-                        controller.startDrag(item, isSource)
-                        val globalPos = itemWindowBounds.topLeft + offset
-                        onGlobalPositionUpdate(globalPos)
-                    },
-                    onDrag = { change, amount ->
-                        change.consume()
-                        dragOffset += amount
-                        val globalPos = itemWindowBounds.topLeft + dragStartOffset + dragOffset
-                        onGlobalPositionUpdate(globalPos)
-                    },
-                    onDragEnd = {
-                        val finalPos = itemWindowBounds.topLeft + dragStartOffset + dragOffset
-                        val droppedOnTarget = when {
-                            targetBounds.contains(finalPos) -> true
-                            sourceBounds.contains(finalPos) -> false
-                            else -> null
-                        }
-                        controller.endDrag(droppedOnTarget, selectedIds)
-                        onDragEnded(droppedOnTarget)
-                    },
-                    onDragCancel = {
-                        controller.endDrag(null)
-                    }
-                )
-            },
+            .clickable { onPreview(item.uri) }
+            .onGloballyPositioned { itemWindowBounds = it.boundsInWindow() },
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
@@ -973,8 +1156,9 @@ fun ImageItemCard(
                 contentDescription = null,
                 modifier = Modifier
                     .fillMaxSize()
-                    .clip(RoundedCornerShape(8.dp)),
-                contentScale = ContentScale.Fit,
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onPreview(item.uri) },
+                contentScale = ContentScale.Crop,
                 alpha = alphaValue
             )
 
@@ -1016,6 +1200,23 @@ fun ImageItemCard(
                 }
             }
 
+            // Zoom preview button (bottom right)
+            IconButton(
+                onClick = { onPreview(item.uri) },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(2.dp)
+                    .size(24.dp)
+                    .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ZoomIn,
+                    contentDescription = "Zoom Preview",
+                    tint = Color.White,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+
             // Remove button 'x'
             IconButton(
                 onClick = onRemove,
@@ -1031,6 +1232,114 @@ fun ImageItemCard(
                     tint = Color.White,
                     modifier = Modifier.size(14.dp)
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun ImagePreviewDialog(
+    uri: Uri,
+    onDismiss: () -> Unit,
+    onDelete: (() -> Unit)? = null
+) {
+    var scale by remember { mutableStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+
+    val view = LocalView.current
+    DisposableEffect(view) {
+        val window = (view.parent as? DialogWindowProvider)?.window
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            window?.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+            window?.attributes = window?.attributes?.apply {
+                blurBehindRadius = 60
+            }
+        }
+        onDispose {}
+    }
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.25f))
+                .clickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null
+                ) { onDismiss() },
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.88f)
+                    .wrapContentHeight(),
+                contentAlignment = Alignment.TopEnd
+            ) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .wrapContentHeight()
+                        .shadow(32.dp, shape = RoundedCornerShape(32.dp))
+                        .graphicsLayer(
+                            scaleX = scale,
+                            scaleY = scale,
+                            translationX = offset.x,
+                            translationY = offset.y
+                        )
+                        .pointerInput(Unit) {
+                            detectTransformGestures { _, pan, zoom, _ ->
+                                scale = (scale * zoom).coerceIn(1f, 6f)
+                                if (scale > 1f) {
+                                    offset += pan
+                                } else {
+                                    offset = Offset.Zero
+                                }
+                            }
+                        },
+                    shape = RoundedCornerShape(32.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 16.dp)
+                ) {
+                    AsyncImage(
+                        model = uri,
+                        contentDescription = "Full Preview",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .wrapContentHeight()
+                            .clip(RoundedCornerShape(32.dp)),
+                        contentScale = ContentScale.FillWidth
+                    )
+                }
+
+                if (onDelete != null) {
+                    val context = LocalContext.current
+                    FilledIconButton(
+                        onClick = {
+                            onDelete()
+                            Toast.makeText(context, "Đã xóa ảnh!", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier
+                            .padding(12.dp)
+                            .size(40.dp)
+                            .shadow(8.dp, CircleShape),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Xóa ảnh",
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
         }
     }

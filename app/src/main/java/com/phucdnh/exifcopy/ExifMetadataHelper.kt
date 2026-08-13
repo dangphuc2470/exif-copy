@@ -2,6 +2,8 @@
 
 import android.content.ContentValues
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
@@ -11,7 +13,9 @@ import android.provider.OpenableColumns
 import android.util.Log
 import androidx.exifinterface.media.ExifInterface
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -44,9 +48,9 @@ data class ExifSettings(
     val copyGpsInfo: Boolean = true,
     val copyDateTaken: Boolean = true,
     val copyCreatedDate: Boolean = true,
-    val copyFileName: Boolean = false, // Changed default to false (keeps target filename by default)
+    val copyFileName: Boolean = true, // Default to true: auto copy source filename
     val copyXmpInfo: Boolean = true,
-    val outputFormat: String = "ORIGINAL" // "ORIGINAL", "JPG", "JPEG", "PNG"
+    val outputFormat: String = "JPG" // "ORIGINAL", "JPG", "JPEG", "PNG", "WEBP_LOSSY", "WEBP_LOSSLESS"
 )
 
 object ExifMetadataHelper {
@@ -66,9 +70,19 @@ object ExifMetadataHelper {
         try {
             val logFile = File(context.cacheDir, "exif_log.txt")
             logFile.appendText("[${SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())}] $message\n")
-            saveLogToPublicPictures(context, logFile)
         } catch (e: Exception) {
             Log.e("ExifCopy", "Error logging to file", e)
+        }
+    }
+
+    fun flushLogToPublicStorage(context: Context) {
+        try {
+            val logFile = File(context.cacheDir, "exif_log.txt")
+            if (logFile.exists()) {
+                saveLogToPublicPictures(context, logFile)
+            }
+        } catch (e: Exception) {
+            Log.e("ExifCopy", "Error flushing log", e)
         }
     }
 
@@ -144,6 +158,38 @@ object ExifMetadataHelper {
         }
     }
 
+    private fun openStreamSafely(context: Context, uri: Uri): InputStream? {
+        try {
+            val isStream = context.contentResolver.openInputStream(uri)
+            if (isStream != null) return isStream
+        } catch (e: Exception) {
+            log(context, "openInputStream warning: ${e.message}")
+        }
+        if (uri.path != null) {
+            try {
+                val file = File(uri.path!!)
+                if (file.exists()) {
+                    return FileInputStream(file)
+                }
+            } catch (e: Exception) {
+                log(context, "FileInputStream error: ${e.message}")
+            }
+        }
+        return null
+    }
+
+    private fun getMimeTypeSafely(context: Context, uri: Uri): String {
+        val type = context.contentResolver.getType(uri)
+        if (type != null && type.isNotBlank()) return type
+        val path = uri.path ?: return "image/jpeg"
+        return when {
+            path.endsWith(".png", ignoreCase = true) -> "image/png"
+            path.endsWith(".webp", ignoreCase = true) -> "image/webp"
+            path.endsWith(".heic", ignoreCase = true) || path.endsWith(".heif", ignoreCase = true) -> "image/heic"
+            else -> "image/jpeg"
+        }
+    }
+
     private val TAGS_TO_COPY = listOf(
         ExifInterface.TAG_MAKE,
         ExifInterface.TAG_MODEL,
@@ -197,7 +243,9 @@ object ExifMetadataHelper {
         targetUri: Uri,
         settings: ExifSettings?,
         itemIndex: Int, // used to apply incremental random time offset
-        replaceOriginal: Boolean
+        replaceOriginal: Boolean,
+        removeWatermark: Boolean = false,
+        watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.AI_MODEL
     ): Uri? {
         try {
             log(context, "--- BẮT ĐẦU SAO CHÉP EXIF ---")
@@ -279,10 +327,23 @@ object ExifMetadataHelper {
             }
 
             // 1. Read EXIF attributes from sourceUri
+
+            // 1. Read EXIF attributes from sourceUri
             // Create a temporary file for the source image first to ensure ExifInterface can seek/parse 100% correctly
             val sourceTempFile = File.createTempFile("exif_source_temp", ".jpg", context.cacheDir)
-            context.contentResolver.openInputStream(sourceUri)?.use { input ->
-                FileOutputStream(sourceTempFile).use { output ->
+            val inputStream = try {
+                context.contentResolver.openInputStream(sourceUri)
+            } catch (e: Exception) {
+                if (sourceUri.scheme == "file" && sourceUri.path != null) {
+                    java.io.FileInputStream(File(sourceUri.path!!))
+                } else null
+            }
+            if (inputStream == null) {
+                log(context, "LỖI: Không thể mở stream từ URI: $sourceUri")
+                return null
+            }
+            inputStream.use { input ->
+                sourceTempFile.outputStream().use { output ->
                     input.copyTo(output)
                 }
             }
@@ -410,7 +471,7 @@ object ExifMetadataHelper {
             val rawFileName = getFileName(context, baseFileNameUri) ?: "exif_copied_${System.currentTimeMillis()}"
 
             // Detect target mime type to decide output format (PNG/JPEG)
-            val targetMimeType = context.contentResolver.getType(targetUri) ?: "image/jpeg"
+            val targetMimeType = getMimeTypeSafely(context, targetUri)
             val originalExt = rawFileName.substringAfterLast(".", "")
             val targetExt = if (originalExt.isNotEmpty()) {
                 ".$originalExt"
@@ -426,10 +487,11 @@ object ExifMetadataHelper {
             // Determine output mime type and extension based on Settings dialog
             val finalFormatSetting = settings?.outputFormat ?: "ORIGINAL"
             val (outputMimeType, tempExt) = when (finalFormatSetting) {
-                "JPG" -> "image/jpeg" to ".JPG"
-                "JPEG" -> "image/jpeg" to ".JPEG"
-                "PNG" -> "image/png" to ".PNG"
-                else -> targetMimeType to targetExt.uppercase(Locale.US)
+                "JPG" -> "image/jpeg" to ".jpg"
+                "JPEG" -> "image/jpeg" to ".jpeg"
+                "PNG" -> "image/png" to ".png"
+                "WEBP_LOSSY", "WEBP_LOSSLESS" -> "image/webp" to ".webp"
+                else -> targetMimeType to targetExt.lowercase(Locale.US)
             }
             log(context, "Target MIME type: $targetMimeType ($targetExt) -> Output MIME type: $outputMimeType ($tempExt)")
             
@@ -439,6 +501,7 @@ object ExifMetadataHelper {
                 false
             } else {
                 when {
+                    finalFormatSetting == "WEBP_LOSSLESS" || finalFormatSetting == "WEBP_LOSSY" -> true
                     outputMimeType == targetMimeType -> false
                     outputMimeType == "image/jpeg" && (targetMimeType == "image/jpeg" || targetMimeType == "image/jpg") -> false
                     outputMimeType == "image/png" && targetMimeType == "image/png" -> false
@@ -451,10 +514,25 @@ object ExifMetadataHelper {
                     val bitmap = android.graphics.BitmapFactory.decodeStream(input)
                     if (bitmap != null) {
                         FileOutputStream(tempFile).use { output ->
-                            val compressFormat = if (outputMimeType == "image/png") {
-                                android.graphics.Bitmap.CompressFormat.PNG
-                            } else {
-                                android.graphics.Bitmap.CompressFormat.JPEG
+                            val compressFormat = when (finalFormatSetting) {
+                                "PNG" -> android.graphics.Bitmap.CompressFormat.PNG
+                                "WEBP_LOSSLESS" -> {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                        android.graphics.Bitmap.CompressFormat.WEBP_LOSSLESS
+                                    } else {
+                                        @Suppress("DEPRECATION")
+                                        android.graphics.Bitmap.CompressFormat.WEBP
+                                    }
+                                }
+                                "WEBP_LOSSY" -> {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                        android.graphics.Bitmap.CompressFormat.WEBP_LOSSY
+                                    } else {
+                                        @Suppress("DEPRECATION")
+                                        android.graphics.Bitmap.CompressFormat.WEBP
+                                    }
+                                }
+                                else -> android.graphics.Bitmap.CompressFormat.JPEG
                             }
                             bitmap.compress(compressFormat, 100, output)
                         }
@@ -465,7 +543,7 @@ object ExifMetadataHelper {
                     }
                 }
             } else {
-                context.contentResolver.openInputStream(targetUri)?.use { input ->
+                openStreamSafely(context, targetUri)?.use { input ->
                     FileOutputStream(tempFile).use { output ->
                         input.copyTo(output)
                     }
@@ -474,70 +552,84 @@ object ExifMetadataHelper {
             }
             log(context, "Tạo temp file thành công: ${tempFile.absolutePath}")
 
-            // Write properties to the temp file
-            val targetExif = ExifInterface(tempFile.absolutePath)
-            for ((tag, value) in sourceAttributes) {
-                targetExif.setAttribute(tag, value)
-            }
-            targetExif.saveAttributes()
-            log(context, "Đã ghi attributes vào temp file và saveAttributes() thành công.")
-
-            // Verify written attributes in the temp file
-            val verifyExif = ExifInterface(tempFile.absolutePath)
-            log(context, "Xác minh các thuộc tính đã ghi trong temp file:")
-            for ((tag, expected) in sourceAttributes) {
-                val actual = verifyExif.getAttribute(tag)
-                log(context, "  Tag $tag -> Thực tế: $actual, Kỳ vọng: $expected")
+            val modesToRun = if (removeWatermark && watermarkMode == GeminiWatermarkRemover.WatermarkMode.ALL_THREE) {
+                listOf(
+                    GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA to "_reverse_alpha",
+                    GeminiWatermarkRemover.WatermarkMode.OPENCV_INPAINT to "_opencv_inpaint",
+                    GeminiWatermarkRemover.WatermarkMode.AI_MODEL to "_ai_model"
+                )
+            } else {
+                listOf(watermarkMode to "")
             }
 
-            // 4. Save temp file back to its final destination
-            if (replaceOriginal && !needsConversion) {
-                try {
-                    context.contentResolver.openOutputStream(targetUri, "rwt")?.use { outputStream ->
-                        tempFile.inputStream().use { inputStream ->
-                            inputStream.copyTo(outputStream)
+            var lastSavedUri: Uri? = null
+
+            for ((subMode, suffix) in modesToRun) {
+                val runTempFile = File.createTempFile("exif_temp_run", tempExt, context.cacheDir)
+                tempFile.copyTo(runTempFile, overwrite = true)
+
+                if (removeWatermark) {
+                    try {
+                        val decodeOptions = BitmapFactory.Options().apply {
+                            inPreferredConfig = Bitmap.Config.ARGB_8888
+                            inMutable = true
                         }
-                    }
-                    tempFile.delete()
-                    log(context, "Đã ghi đè file gốc thành công.")
-                    
-                    // Force rename/update DISPLAY_NAME of the original target file to uppercase extension if needed
-                    val originalName = getFileName(context, targetUri)
-                    val targetNameWithUpper = if (originalName != null) {
-                        val baseName = getBaseName(originalName)
-                        "$baseName$tempExt"
-                    } else null
-
-                    if (targetNameWithUpper != null && originalName != targetNameWithUpper) {
-                        try {
-                            val updateValues = ContentValues().apply {
-                                put(MediaStore.MediaColumns.DISPLAY_NAME, targetNameWithUpper)
+                        val bitmap = BitmapFactory.decodeFile(runTempFile.absolutePath, decodeOptions)
+                        if (bitmap != null) {
+                            val result = GeminiWatermarkRemover.processImage(bitmap, subMode)
+                            log(context, "Đã xử lý xóa watermark Gemini (${subMode.displayName}, detected=${result.detected}, match=${result.match}).")
+                            FileOutputStream(runTempFile).use { output ->
+                                val compressFormat = when {
+                                    tempExt.equals(".PNG", ignoreCase = true) -> android.graphics.Bitmap.CompressFormat.PNG
+                                    tempExt.equals(".WEBP", ignoreCase = true) -> {
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                            android.graphics.Bitmap.CompressFormat.WEBP_LOSSLESS
+                                        } else {
+                                            @Suppress("DEPRECATION")
+                                            android.graphics.Bitmap.CompressFormat.WEBP
+                                        }
+                                    }
+                                    else -> android.graphics.Bitmap.CompressFormat.JPEG
+                                }
+                                val quality = if (compressFormat == android.graphics.Bitmap.CompressFormat.PNG) 100 else 95
+                                result.bitmap.compress(compressFormat, quality, output)
                             }
-                            context.contentResolver.update(targetUri, updateValues, null, null)
-                            log(context, "Cập nhật display name trước khi quét: $targetNameWithUpper")
-                        } catch (ue: Exception) {
-                            log(context, "Lỗi cập nhật display name trước khi quét: ${ue.message}")
+                            if (result.bitmap !== bitmap) {
+                                result.bitmap.recycle()
+                            }
+                            bitmap.recycle()
                         }
+                    } catch (e: Exception) {
+                        log(context, "Lỗi khi xóa watermark Gemini (${subMode.displayName}): ${e.message}")
                     }
-
-                    // Force scan the overwritten file to update system Gallery
-                    forceScanFile(context, targetUri, targetMimeType, targetNameWithUpper)
-                    
-                    return targetUri
-                } catch (e: SecurityException) {
-                    log(context, "Lỗi ghi đè file gốc (Permission Denied). Sẽ lưu bản copy.")
-                    // Fall back to copy
                 }
+
+                // Write properties to the temp file
+                val targetExif = ExifInterface(runTempFile.absolutePath)
+                for ((tag, value) in sourceAttributes) {
+                    targetExif.setAttribute(tag, value)
+                }
+                try {
+                    targetExif.saveAttributes()
+                    log(context, "Đã ghi attributes vào temp file (${subMode.displayName}).")
+                } catch (e: Exception) {
+                    log(context, "Lưu EXIF attributes không bắt buộc: ${e.message}")
+                }
+
+                // Save to public storage (Pictures/ExifCopy)
+                val baseName = getBaseName(rawFileName)
+                val nameWithSuffix = "$baseName$suffix"
+                val fileName = getUniqueFileName(context, nameWithSuffix, tempExt)
+                log(context, "Tên file đích cuối cùng: $fileName")
+                val savedUri = saveToPublicPictures(context, runTempFile, fileName, outputMimeType)
+                log(context, "Đã lưu bản sao vào Pictures/ExifCopy: $fileName. Output URI: $savedUri")
+                runTempFile.delete()
+                lastSavedUri = savedUri
             }
 
-            // Save to public storage (Pictures/ExifCopy)
-            val baseName = getBaseName(rawFileName)
-            val fileName = getUniqueFileName(context, baseName, tempExt)
-            log(context, "Tên file đích cuối cùng: $fileName")
-            val savedUri = saveToPublicPictures(context, tempFile, fileName, outputMimeType)
-            log(context, "Đã lưu bản sao vào Pictures/ExifCopy. Output URI: $savedUri")
             tempFile.delete()
-            return savedUri
+            flushLogToPublicStorage(context)
+            return lastSavedUri
 
         } catch (e: Exception) {
             val fullError = "LỖI TRONG copyMetadata: ${e.message}\n${Log.getStackTraceString(e)}"
@@ -546,107 +638,140 @@ object ExifMetadataHelper {
         }
     }
 
-    fun cleanGoogleAiMetadata(context: Context, targetUri: Uri, replaceOriginal: Boolean): Uri? {
+    fun cleanGoogleAiMetadata(
+        context: Context,
+        targetUri: Uri,
+        replaceOriginal: Boolean,
+        removeWatermark: Boolean = false,
+        watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.AI_MODEL
+    ): Uri? {
         try {
             log(context, "--- BẮT ĐẦU XÓA NHÃN AI ---")
             log(context, "Target URI: $targetUri")
             log(context, "Replace Original: $replaceOriginal")
+            log(context, "Remove Watermark: $removeWatermark")
+            log(context, "Watermark Mode: ${watermarkMode.displayName}")
 
-            val targetMimeType = context.contentResolver.getType(targetUri) ?: "image/jpeg"
+            val targetMimeType = getMimeTypeSafely(context, targetUri)
             val tempExt = when {
-                targetMimeType.contains("png", ignoreCase = true) -> ".PNG"
-                targetMimeType.contains("webp", ignoreCase = true) -> ".WEBP"
-                targetMimeType.contains("heic", ignoreCase = true) || targetMimeType.contains("heif", ignoreCase = true) -> ".HEIC"
-                else -> ".JPG"
+                targetMimeType.contains("png", ignoreCase = true) -> ".png"
+                targetMimeType.contains("webp", ignoreCase = true) -> ".webp"
+                targetMimeType.contains("heic", ignoreCase = true) || targetMimeType.contains("heif", ignoreCase = true) -> ".heic"
+                else -> ".jpg"
             }
             
             val tempFile = File.createTempFile("exif_clean_temp", tempExt, context.cacheDir)
-            context.contentResolver.openInputStream(targetUri)?.use { input ->
+            openStreamSafely(context, targetUri)?.use { input ->
                 FileOutputStream(tempFile).use { output ->
                     input.copyTo(output)
                 }
             }
 
-            val exif = ExifInterface(tempFile.absolutePath)
-            val xmp = exif.getAttribute(ExifInterface.TAG_XMP)
-            if (xmp != null) {
-                // Strip Google AI specific XMP tags using Regex
-                var cleanedXmp = xmp
-                
-                // Remove Credit
-                val creditRegex = """<photoshop:Credit>[^<]*</photoshop:Credit>""".toRegex()
-                cleanedXmp = cleanedXmp.replace(creditRegex, "")
-
-                // Remove DigitalSourceType
-                val dstRegex = """<Iptc4xmpExt:DigitalSourceType>[^<]*</Iptc4xmpExt:DigitalSourceType>""".toRegex()
-                cleanedXmp = cleanedXmp.replace(dstRegex, "")
-
-                // Remove HasExtendedXMP if it refers to Google AI properties
-                val hasExtendedXmpRegex = """<xmpNote:HasExtendedXMP>[^<]*</xmpNote:HasExtendedXMP>""".toRegex()
-                cleanedXmp = cleanedXmp.replace(hasExtendedXmpRegex, "")
-
-                exif.setAttribute(ExifInterface.TAG_XMP, cleanedXmp)
-                log(context, "Đã làm sạch thẻ XMP AI.")
+            val modesToRun = if (removeWatermark && watermarkMode == GeminiWatermarkRemover.WatermarkMode.ALL_THREE) {
+                listOf(
+                    GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA to "_reverse_alpha",
+                    GeminiWatermarkRemover.WatermarkMode.OPENCV_INPAINT to "_opencv_inpaint",
+                    GeminiWatermarkRemover.WatermarkMode.AI_MODEL to "_ai_model"
+                )
+            } else {
+                listOf(watermarkMode to "")
             }
 
-            // Check Software/UserComment for "Google" or "AI"
-            val software = exif.getAttribute(ExifInterface.TAG_SOFTWARE)
-            if (software != null && (software.contains("Google", ignoreCase = true) || software.contains("AI", ignoreCase = true))) {
-                exif.setAttribute(ExifInterface.TAG_SOFTWARE, "Android Camera")
-                log(context, "Ghi đè Software: $software -> Android Camera")
-            }
-
-            val comment = exif.getAttribute(ExifInterface.TAG_USER_COMMENT)
-            if (comment != null && (comment.contains("Google", ignoreCase = true) || comment.contains("AI", ignoreCase = true))) {
-                exif.setAttribute(ExifInterface.TAG_USER_COMMENT, null)
-                log(context, "Xóa UserComment: $comment")
-            }
-
-            exif.saveAttributes()
-            log(context, "Đã lưu attributes đã làm sạch vào temp file.")
-
-            if (replaceOriginal) {
-                try {
-                    context.contentResolver.openOutputStream(targetUri, "rwt")?.use { outputStream ->
-                        tempFile.inputStream().use { inputStream ->
-                            inputStream.copyTo(outputStream)
-                        }
-                    }
-                    tempFile.delete()
-                    log(context, "Đã ghi đè file gốc làm sạch thành công.")
-
-                    // Force rename/update DISPLAY_NAME of the original target file to uppercase extension if needed
-                    val originalName = getFileName(context, targetUri)
-                    val targetNameWithUpper = if (originalName != null) {
-                        val baseName = getBaseName(originalName)
-                        "$baseName$tempExt"
-                    } else null
-
-                    if (targetNameWithUpper != null && originalName != targetNameWithUpper) {
-                        try {
-                            val updateValues = ContentValues().apply {
-                                put(MediaStore.MediaColumns.DISPLAY_NAME, targetNameWithUpper)
-                            }
-                            context.contentResolver.update(targetUri, updateValues, null, null)
-                            log(context, "Cập nhật display name trước khi quét: $targetNameWithUpper")
-                        } catch (ue: Exception) {
-                            log(context, "Lỗi cập nhật display name trước khi quét: ${ue.message}")
-                        }
-                    }
-
-                    forceScanFile(context, targetUri, targetMimeType, targetNameWithUpper)
-                    return targetUri
-                } catch (e: SecurityException) {
-                    log(context, "Lỗi ghi đè file gốc làm sạch (Permission Denied). Sẽ lưu bản copy.")
-                }
-            }
-
+            var lastSavedUri: Uri? = null
             val rawFileName = getFileName(context, targetUri) ?: "clean_${System.currentTimeMillis()}"
             val baseName = "clean_" + getBaseName(rawFileName)
-            val fileName = getUniqueFileName(context, baseName, tempExt)
-            val savedUri = saveToPublicPictures(context, tempFile, fileName, targetMimeType)
+
+            for ((subMode, suffix) in modesToRun) {
+                val runTempFile = File.createTempFile("exif_clean_run", tempExt, context.cacheDir)
+                tempFile.copyTo(runTempFile, overwrite = true)
+
+                if (removeWatermark) {
+                    try {
+                        val decodeOptions = BitmapFactory.Options().apply {
+                            inPreferredConfig = Bitmap.Config.ARGB_8888
+                            inMutable = true
+                            inPremultiplied = false
+                        }
+                        val bitmap = BitmapFactory.decodeFile(runTempFile.absolutePath, decodeOptions)
+                        if (bitmap != null) {
+                            val result = GeminiWatermarkRemover.processImage(bitmap, subMode)
+                            log(context, "Đã xử lý xóa watermark Gemini (${subMode.displayName}, detected=${result.detected}, match=${result.match}).")
+                            val compressed = FileOutputStream(runTempFile).use { output ->
+                                val compressFormat = when {
+                                    tempExt.contains("png", ignoreCase = true) -> android.graphics.Bitmap.CompressFormat.PNG
+                                    tempExt.contains("webp", ignoreCase = true) -> {
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                            android.graphics.Bitmap.CompressFormat.WEBP_LOSSLESS
+                                        } else {
+                                            @Suppress("DEPRECATION")
+                                            android.graphics.Bitmap.CompressFormat.WEBP
+                                        }
+                                    }
+                                    else -> android.graphics.Bitmap.CompressFormat.JPEG
+                                }
+                                val quality = if (compressFormat == android.graphics.Bitmap.CompressFormat.PNG) 100 else 95
+                                val res = result.bitmap.compress(compressFormat, quality, output)
+                                output.flush()
+                                res
+                            }
+                            log(context, "Compress result: $compressed, runTempFile size: ${runTempFile.length()}")
+                            if (result.bitmap !== bitmap) {
+                                result.bitmap.recycle()
+                            }
+                            bitmap.recycle()
+                        }
+                    } catch (e: Exception) {
+                        log(context, "Lỗi khi xóa watermark Gemini (${subMode.displayName}): ${e.message}")
+                    }
+                }
+
+                val exif = ExifInterface(runTempFile.absolutePath)
+                val xmp = exif.getAttribute(ExifInterface.TAG_XMP)
+                if (xmp != null) {
+                    var cleanedXmp = xmp
+                    val creditRegex = """<photoshop:Credit>[^<]*</photoshop:Credit>""".toRegex()
+                    cleanedXmp = cleanedXmp.replace(creditRegex, "")
+
+                    val dstRegex = """<Iptc4xmpExt:DigitalSourceType>[^<]*</Iptc4xmpExt:DigitalSourceType>""".toRegex()
+                    cleanedXmp = cleanedXmp.replace(dstRegex, "")
+
+                    val hasExtendedXmpRegex = """<xmpNote:HasExtendedXMP>[^<]*</xmpNote:HasExtendedXMP>""".toRegex()
+                    cleanedXmp = cleanedXmp.replace(hasExtendedXmpRegex, "")
+
+                    exif.setAttribute(ExifInterface.TAG_XMP, cleanedXmp)
+                    log(context, "Đã làm sạch thẻ XMP AI.")
+                }
+
+                val software = exif.getAttribute(ExifInterface.TAG_SOFTWARE)
+                if (software != null && (software.contains("Google", ignoreCase = true) || software.contains("AI", ignoreCase = true))) {
+                    exif.setAttribute(ExifInterface.TAG_SOFTWARE, "Android Camera")
+                    log(context, "Ghi đè Software: $software -> Android Camera")
+                }
+
+                val comment = exif.getAttribute(ExifInterface.TAG_USER_COMMENT)
+                if (comment != null && (comment.contains("Google", ignoreCase = true) || comment.contains("AI", ignoreCase = true))) {
+                    exif.setAttribute(ExifInterface.TAG_USER_COMMENT, null)
+                    log(context, "Xóa UserComment: $comment")
+                }
+
+                try {
+                    exif.saveAttributes()
+                    log(context, "Đã lưu attributes đã làm sạch vào temp file (${subMode.displayName}).")
+                } catch (e: Exception) {
+                    log(context, "Bỏ qua saveAttributes nếu không hỗ trợ EXIF: ${e.message}")
+                }
+
+                val nameWithSuffix = "$baseName$suffix"
+                val fileName = getUniqueFileName(context, nameWithSuffix, tempExt)
+                val savedUri = saveToPublicPictures(context, runTempFile, fileName, targetMimeType)
+                log(context, "Đã lưu bản sao vào Pictures/ExifCopy: $fileName. Output URI: $savedUri")
+                runTempFile.delete()
+                lastSavedUri = savedUri
+            }
+
             tempFile.delete()
-            return savedUri
+            flushLogToPublicStorage(context)
+            return lastSavedUri
 
         } catch (e: Exception) {
             val fullError = "LỖI TRONG cleanGoogleAiMetadata: ${e.message}\n${Log.getStackTraceString(e)}"
@@ -656,6 +781,20 @@ object ExifMetadataHelper {
     }
 
     private fun saveToPublicPictures(context: Context, sourceFile: File, fileName: String, mimeType: String): Uri? {
+        try {
+            val targetDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "ExifCopy")
+            if (!targetDir.exists()) targetDir.mkdirs()
+            val targetFile = File(targetDir, fileName)
+            sourceFile.copyTo(targetFile, overwrite = true)
+            log(context, "Đã sao chép trực tiếp vào file: ${targetFile.absolutePath} (size=${targetFile.length()})")
+
+            val uri = Uri.fromFile(targetFile)
+            forceScanFile(context, uri, mimeType, fileName)
+            return uri
+        } catch (e: Exception) {
+            log(context, "Lỗi copy file trực tiếp: ${e.message}, dùng MediaStore fallback")
+        }
+
         val resolver = context.contentResolver
         val contentValues = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
@@ -679,20 +818,11 @@ object ExifMetadataHelper {
                     contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
                     contentValues.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
                     resolver.update(imageUri, contentValues, null, null)
-                } else {
-                    val updateValues = ContentValues().apply {
-                        put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                    }
-                    resolver.update(imageUri, updateValues, null, null)
                 }
-                
-                // Force scan the new file with uppercase target filename mapping
                 forceScanFile(context, imageUri, mimeType, fileName)
-                
                 return imageUri
             } catch (e: Exception) {
-                val errorMsg = "Lỗi copy file vào MediaStore URI $imageUri: ${e.message}\n${Log.getStackTraceString(e)}"
-                log(context, errorMsg)
+                log(context, "Lỗi copy file vào MediaStore URI $imageUri: ${e.message}")
             }
         }
         return null
