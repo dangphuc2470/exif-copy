@@ -1922,36 +1922,56 @@ fun ImagePreviewDialog(
                         val downPos = down.position
                         val downTime = System.currentTimeMillis()
                         var hasTransform = false
+                        var totalDragY = 0f
+                        var totalDragX = 0f
+                        var lastY = downPos.y
+                        var lastX = downPos.x
+                        val rect = photoRect
+                        val isOnPhoto = rect != null && rect.contains(downPos)
 
                         do {
                             val event = awaitPointerEvent()
                             val zoom = event.calculateZoom()
                             val pan = event.calculatePan()
+                            val currentPointer = event.changes.firstOrNull()
 
                             if (zoom != 1f || pan.getDistance() > 2f) {
                                 hasTransform = true
                                 val currentScale = scaleAnim.value
                                 val newScale = (currentScale * zoom).coerceIn(0.7f, 8f)
-                                val dampening = if (newScale < 1f) 0.35f else 1f
-                                // Pan speed normalized to scale: slower when zoomed in feels natural
-                                val panFactor = dampening / currentScale.coerceAtLeast(1f)
-                                val newOffsetX = offsetXAnim.value + pan.x * panFactor * currentScale
-                                val newOffsetY = offsetYAnim.value + pan.y * panFactor * currentScale
 
-                                coroutineScope.launch {
-                                    scaleAnim.snapTo(newScale)
-                                    offsetXAnim.snapTo(newOffsetX)
-                                    offsetYAnim.snapTo(newOffsetY)
+                                if (newScale <= 1.05f && isOnPhoto && event.changes.size == 1) {
+                                    // At 1x on photo with 1 finger: swipe-to-dismiss drag
+                                    val dy = pan.y
+                                    val dx = pan.x
+                                    totalDragY += dy
+                                    totalDragX += dx
+                                    coroutineScope.launch {
+                                        offsetYAnim.snapTo(offsetYAnim.value + dy)
+                                    }
+                                } else {
+                                    // Zoomed or pinch: normal pan/zoom
+                                    val dampening = if (newScale < 1f) 0.35f else 1f
+                                    val panFactor = dampening / currentScale.coerceAtLeast(1f)
+                                    val newOffsetX = offsetXAnim.value + pan.x * panFactor * currentScale
+                                    val newOffsetY = offsetYAnim.value + pan.y * panFactor * currentScale
+                                    coroutineScope.launch {
+                                        scaleAnim.snapTo(newScale)
+                                        offsetXAnim.snapTo(newOffsetX)
+                                        offsetYAnim.snapTo(newOffsetY)
+                                    }
                                 }
                                 event.changes.forEach { it.consume() }
                             }
                         } while (event.changes.any { it.pressed })
 
                         val elapsed = System.currentTimeMillis() - downTime
-                        if (!hasTransform && elapsed < 320) {
-                            val rect = photoRect
-                            val isOnPhoto = rect != null && rect.contains(downPos)
+                        val swipeThreshold = 90f   // px before commit dismiss
+                        val absDragY = kotlin.math.abs(totalDragY)
+                        val swipeVelocity = if (elapsed > 0) absDragY / elapsed * 1000f else 0f
 
+                        if (!hasTransform && elapsed < 320) {
+                            // Pure tap
                             val now = System.currentTimeMillis()
                             if (isOnPhoto && now - lastTapTime < 320) {
                                 // Double tap on photo -> toggle zoom
@@ -1966,11 +1986,28 @@ fun ImagePreviewDialog(
                                     }
                                 }
                             } else if (isOnPhoto) {
-                                // First tap on photo: just record time, do nothing
                                 lastTapTime = now
                             } else {
                                 // Tap on background -> dismiss instantly
                                 handleDismiss()
+                            }
+                        } else if (isOnPhoto && scaleAnim.value <= 1.05f && absDragY > 0) {
+                            // Was a swipe drag on photo at 1x
+                            if (absDragY > swipeThreshold || swipeVelocity > 400f) {
+                                // Commit dismiss: fly out in swipe direction
+                                val flyDir = if (totalDragY > 0) 1f else -1f
+                                coroutineScope.launch {
+                                    launch { offsetYAnim.animateTo(flyDir * size.height.toFloat(), tween(160, easing = FastOutLinearInEasing)) }
+                                    launch { fadeAlpha.animateTo(0f, tween(140, easing = FastOutLinearInEasing)) }
+                                    kotlinx.coroutines.delay(160)
+                                    onDismiss()
+                                }
+                            } else {
+                                // Snap back to center
+                                coroutineScope.launch {
+                                    launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.72f, stiffness = 400f)) }
+                                    launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.72f, stiffness = 400f)) }
+                                }
                             }
                         } else if (scaleAnim.value <= 1.05f && hasTransform) {
                             coroutineScope.launch {
