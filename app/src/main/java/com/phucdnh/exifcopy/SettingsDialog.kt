@@ -16,7 +16,8 @@ import java.util.Locale
 fun SettingsDialog(
     currentSettings: ExifSettings,
     onDismiss: () -> Unit,
-    onSave: (ExifSettings) -> Unit
+    onSave: (ExifSettings) -> Unit,
+    isVi: Boolean = true
 ) {
     var randomizeShutter by remember { mutableStateOf(currentSettings.randomizeShutter) }
     var shutterMinOffsetPct by remember { mutableStateOf(currentSettings.shutterMinOffsetPct) }
@@ -49,7 +50,7 @@ fun SettingsDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Cấu hình Sao chép & Random EXIF") },
+        title = { Text(if (isVi) "Cấu hình sao chép & random EXIF" else "EXIF Copy & Randomization Settings") },
         text = {
             Column(
                 modifier = Modifier
@@ -61,36 +62,36 @@ fun SettingsDialog(
                 // Section: Metadata Fields to Copy
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Thông tin sao chép", style = MaterialTheme.typography.titleMedium)
+                        Text(if (isVi) "Thông tin sao chép" else "Copied Metadata", style = MaterialTheme.typography.titleMedium)
                         Spacer(modifier = Modifier.height(8.dp))
                         
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = copyCameraInfo, onCheckedChange = { copyCameraInfo = it })
-                            Text("Thông tin máy ảnh & ống kính")
+                            Text(if (isVi) "Thông tin máy ảnh & ống kính" else "Camera & lens information")
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = copyShootingInfo, onCheckedChange = { copyShootingInfo = it })
-                            Text("Thông số chụp (ISO, Khẩu, Tốc...)")
+                            Text(if (isVi) "Thông số chụp (ISO, khẩu độ, tốc độ...)" else "Exposure settings (ISO, aperture, shutter...)")
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = copyGpsInfo, onCheckedChange = { copyGpsInfo = it })
-                            Text("Vị trí địa lý (GPS)")
+                            Text(if (isVi) "Vị trí địa lý (GPS)" else "Geographic location (GPS)")
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = copyDateTaken, onCheckedChange = { copyDateTaken = it })
-                            Text("Ngày chụp (Date Taken)")
+                            Text(if (isVi) "Ngày chụp (Date taken)" else "Date taken")
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = copyCreatedDate, onCheckedChange = { copyCreatedDate = it })
-                            Text("Ngày tạo file (Created Date)")
+                            Text(if (isVi) "Ngày tạo file (Created date)" else "File creation date")
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = copyFileName, onCheckedChange = { copyFileName = it })
-                            Text("Sao chép tên file nguồn")
+                            Text(if (isVi) "Sao chép tên file nguồn" else "Copy source filename")
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = copyXmpInfo, onCheckedChange = { copyXmpInfo = it })
-                            Text("Thông tin XMP & khác")
+                            Text(if (isVi) "Thông tin XMP & khác" else "XMP & other metadata")
                         }
                     }
                 }
@@ -98,7 +99,7 @@ fun SettingsDialog(
                 // Section: Output Format (Định dạng đầu ra)
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Định dạng ảnh đầu ra (Output Format)", style = MaterialTheme.typography.titleMedium)
+                        Text(if (isVi) "Định dạng ảnh đầu ra (Output format)" else "Output Image Format", style = MaterialTheme.typography.titleMedium)
                         Spacer(modifier = Modifier.height(8.dp))
                         
                         val formats = listOf("ORIGINAL", "JPG", "JPEG", "PNG", "WEBP_LOSSY", "WEBP_LOSSLESS")
@@ -117,9 +118,9 @@ fun SettingsDialog(
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     val displayName = when (format) {
-                                        "ORIGINAL" -> "Giữ nguyên định dạng gốc"
-                                        "WEBP_LOSSY" -> "WebP (Lossy - Có hao hụt)"
-                                        "WEBP_LOSSLESS" -> "WebP (Lossless - Không hao hụt)"
+                                        "ORIGINAL" -> if (isVi) "Giữ nguyên định dạng gốc" else "Keep original format"
+                                        "WEBP_LOSSY" -> if (isVi) "WebP (Lossy - Có hao hụt)" else "WebP (Lossy)"
+                                        "WEBP_LOSSLESS" -> if (isVi) "WebP (Lossless - Không hao hụt)" else "WebP (Lossless)"
                                         else -> format
                                     }
                                     Text(displayName)
@@ -132,12 +133,12 @@ fun SettingsDialog(
                 // Section: Shutter Speed
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Shutter Speed (Exposure Time)", style = MaterialTheme.typography.titleMedium)
+                        Text(if (isVi) "Tốc độ màn trập (Shutter speed)" else "Shutter Speed (Exposure time)", style = MaterialTheme.typography.titleMedium)
                         Spacer(modifier = Modifier.height(8.dp))
                         OutlinedTextField(
                             value = shutterFixedValue,
                             onValueChange = { shutterFixedValue = it },
-                            label = { Text("Fixed value (e.g. 1/125, 0.008)") },
+                            label = { Text(if (isVi) "Giá trị cố định (vd: 1/125, 0.008)" else "Fixed value (e.g. 1/125, 0.008)") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             enabled = shutterFixedValue.isNotEmpty() || (!randomizeShutter)
@@ -152,10 +153,10 @@ fun SettingsDialog(
                                 },
                                 enabled = shutterFixedValue.isEmpty()
                             )
-                            Text("Randomize by offset (%)")
+                            Text(if (isVi) "Random theo độ lệch (%)" else "Randomize by offset (%)")
                         }
                         if (randomizeShutter && shutterFixedValue.isEmpty()) {
-                            Text("Range: ${shutterMinOffsetPct.toInt()}% to ${shutterMaxOffsetPct.toInt()}%")
+                            Text(if (isVi) "Khoảng: ${shutterMinOffsetPct.toInt()}% đến ${shutterMaxOffsetPct.toInt()}%" else "Range: ${shutterMinOffsetPct.toInt()}% to ${shutterMaxOffsetPct.toInt()}%")
                             RangeSlider(
                                 value = shutterMinOffsetPct.toFloat()..shutterMaxOffsetPct.toFloat(),
                                 onValueChange = { range ->
@@ -172,12 +173,12 @@ fun SettingsDialog(
                 // Section: Aperture (F-Stop)
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Aperture (F-Number)", style = MaterialTheme.typography.titleMedium)
+                        Text(if (isVi) "Khẩu độ (Aperture / F-Stop)" else "Aperture (F-Stop)", style = MaterialTheme.typography.titleMedium)
                         Spacer(modifier = Modifier.height(8.dp))
                         OutlinedTextField(
                             value = apertureFixedValue,
                             onValueChange = { apertureFixedValue = it },
-                            label = { Text("Fixed value (e.g. 2.8, 8.0)") },
+                            label = { Text(if (isVi) "Giá trị cố định (vd: 2.8, 8.0)" else "Fixed value (e.g. 2.8, 8.0)") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             enabled = apertureFixedValue.isNotEmpty() || (!randomizeAperture)
@@ -192,10 +193,10 @@ fun SettingsDialog(
                                 },
                                 enabled = apertureFixedValue.isEmpty()
                             )
-                            Text("Randomize by offset (f-stop value)")
+                            Text(if (isVi) "Random theo độ lệch f-stop" else "Randomize by offset (f-stop)")
                         }
                         if (randomizeAperture && apertureFixedValue.isEmpty()) {
-                            Text(String.format(Locale.US, "Range: %.1f to %.1f", apertureMinOffset, apertureMaxOffset))
+                            Text(String.format(Locale.US, if (isVi) "Khoảng: %.1f đến %.1f" else "Range: %.1f to %.1f", apertureMinOffset, apertureMaxOffset))
                             RangeSlider(
                                 value = apertureMinOffset.toFloat()..apertureMaxOffset.toFloat(),
                                 onValueChange = { range ->
@@ -212,12 +213,12 @@ fun SettingsDialog(
                 // Section: Focal Length
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Focal Length", style = MaterialTheme.typography.titleMedium)
+                        Text(if (isVi) "Tiêu cự (Focal length)" else "Focal Length", style = MaterialTheme.typography.titleMedium)
                         Spacer(modifier = Modifier.height(8.dp))
                         OutlinedTextField(
                             value = focalFixedValue,
                             onValueChange = { focalFixedValue = it },
-                            label = { Text("Fixed value (e.g. 50, 24)") },
+                            label = { Text(if (isVi) "Giá trị cố định (vd: 50, 24)" else "Fixed value (e.g. 50, 24)") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             enabled = focalFixedValue.isNotEmpty() || (!randomizeFocalLength)
@@ -232,10 +233,10 @@ fun SettingsDialog(
                                 },
                                 enabled = focalFixedValue.isEmpty()
                             )
-                            Text("Randomize by offset (mm)")
+                            Text(if (isVi) "Random theo độ lệch (mm)" else "Randomize by offset (mm)")
                         }
                         if (randomizeFocalLength && focalFixedValue.isEmpty()) {
-                            Text("Range: ${focalMinOffset.toInt()}mm to ${focalMaxOffset.toInt()}mm")
+                            Text(if (isVi) "Khoảng: ${focalMinOffset.toInt()}mm đến ${focalMaxOffset.toInt()}mm" else "Range: ${focalMinOffset.toInt()}mm to ${focalMaxOffset.toInt()}mm")
                             RangeSlider(
                                 value = focalMinOffset.toFloat()..focalMaxOffset.toFloat(),
                                 onValueChange = { range ->
@@ -252,25 +253,25 @@ fun SettingsDialog(
                 // Section: Date Time Sequence
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Date/Time (Sequential Batch)", style = MaterialTheme.typography.titleMedium)
+                        Text(if (isVi) "Thời gian chụp (Date & Time)" else "Date & Time (Sequential batch)", style = MaterialTheme.typography.titleMedium)
                         Spacer(modifier = Modifier.height(8.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(
                                 checked = randomizeTime,
                                 onCheckedChange = { randomizeTime = it }
                             )
-                            Text("Apply sequential date offset")
+                            Text(if (isVi) "Áp dụng độ lệch thời gian tuần tự" else "Apply sequential date offset")
                         }
                         if (randomizeTime) {
                             OutlinedTextField(
                                 value = baseTimeAddSecs.toString(),
                                 onValueChange = { baseTimeAddSecs = it.toLongOrNull() ?: 0L },
-                                label = { Text("Base offset addition (seconds)") },
+                                label = { Text(if (isVi) "Thời gian gốc cộng thêm (giây)" else "Base offset addition (seconds)") },
                                 modifier = Modifier.fillMaxWidth(),
                                 singleLine = true
                             )
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text("Incremental delay between photos: ${timeMinSecs}s to ${timeMaxSecs}s")
+                            Text(if (isVi) "Độ trễ tăng dần giữa các ảnh: ${timeMinSecs}s đến ${timeMaxSecs}s" else "Incremental delay between photos: ${timeMinSecs}s to ${timeMaxSecs}s")
                             RangeSlider(
                                 value = timeMinSecs.toFloat()..timeMaxSecs.toFloat(),
                                 onValueChange = { range ->
@@ -320,12 +321,12 @@ fun SettingsDialog(
                     )
                 )
             }) {
-                Text("Lưu")
+                Text(if (isVi) "Lưu" else "Save")
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Hủy")
+                Text(if (isVi) "Hủy" else "Cancel")
             }
         }
     )

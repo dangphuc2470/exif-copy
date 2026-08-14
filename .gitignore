@@ -20,3 +20,8 @@ Thumbs.db
 
 # User Assets & Cache
 assets/
+*.zip
+GeminiWatermarkTool-main/
+gemini-watermark-remover/
+window_dump*.xml
+test_gwr_out.png

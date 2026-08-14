@@ -92,10 +92,10 @@ object ExifMetadataHelper {
             if (logFile.exists()) {
                 logFile.readText()
             } else {
-                "Chưa có nhật ký ghi chép."
+                ""
             }
         } catch (e: Exception) {
-            "Lỗi đọc nhật ký: ${e.message}"
+            "Error: ${e.message}"
         }
     }
 
@@ -245,7 +245,7 @@ object ExifMetadataHelper {
         itemIndex: Int, // used to apply incremental random time offset
         replaceOriginal: Boolean,
         removeWatermark: Boolean = false,
-        watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.AI_MODEL
+        watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA
     ): Uri? {
         try {
             log(context, "--- BẮT ĐẦU SAO CHÉP EXIF ---")
@@ -643,7 +643,7 @@ object ExifMetadataHelper {
         targetUri: Uri,
         replaceOriginal: Boolean,
         removeWatermark: Boolean = false,
-        watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.AI_MODEL
+        watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA
     ): Uri? {
         try {
             log(context, "--- BẮT ĐẦU XÓA NHÃN AI ---")

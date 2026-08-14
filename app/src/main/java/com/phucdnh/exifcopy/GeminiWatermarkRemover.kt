@@ -30,11 +30,14 @@ object GeminiWatermarkRemover {
 
     private const val TAG = "GeminiWatermarkRemover"
 
-    enum class WatermarkMode(val displayName: String) {
-        REVERSE_ALPHA("1. Reverse Alpha (Toán học)"),
-        OPENCV_INPAINT("2. OpenCV Telea (Inpainting)"),
-        AI_MODEL("3. AI Denoise Model (FDnCNN AI)"),
-        ALL_THREE("4. Xuất cả 3 phương án (3 file)")
+    enum class WatermarkMode(val displayNameVi: String, val displayNameEn: String) {
+        REVERSE_ALPHA("1. Reverse Alpha (Toán học)", "1. Reverse Alpha (Mathematical)"),
+        OPENCV_INPAINT("2. OpenCV Telea (Inpainting)", "2. OpenCV Telea (Inpainting)"),
+        AI_MODEL("3. AI Denoise Model (FDnCNN AI)", "3. AI Denoise Model (FDnCNN AI)"),
+        ALL_THREE("4. Xuất cả 3 phương án (3 file)", "4. Export all 3 modes (3 files)");
+
+        val displayName: String get() = displayNameVi
+        fun getDisplayName(isVi: Boolean): String = if (isVi) displayNameVi else displayNameEn
     }
 
     private const val ALPHA_NOISE_FLOOR = 3.0f / 255.0f

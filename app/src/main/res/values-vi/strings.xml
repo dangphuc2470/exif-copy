@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">EXIF Copy</string>
+    <string name="share_source_label">Ảnh nguồn (EXIF)</string>
+    <string name="share_destination_label">Ảnh đích (EXIF)</string>
+    <string name="share_remove_ai_label">Xóa nhãn AI</string>
+</resources>
