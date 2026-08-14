@@ -1850,16 +1850,16 @@ fun ImagePreviewDialog(
     }
     var imageAspectRatio by remember(uri) { mutableStateOf(initialAspect) }
 
-    // Pure fade-in on enter
+    // Pure snappy fade-in on enter
     LaunchedEffect(Unit) {
-        fadeAlpha.animateTo(1f, tween(durationMillis = 200, easing = LinearOutSlowInEasing))
+        fadeAlpha.animateTo(1f, tween(durationMillis = 120, easing = LinearOutSlowInEasing))
     }
 
     val handleDismiss = {
         if (!isClosing) {
             isClosing = true
             coroutineScope.launch {
-                fadeAlpha.animateTo(0f, tween(durationMillis = 180, easing = FastOutLinearInEasing))
+                fadeAlpha.animateTo(0f, tween(durationMillis = 100, easing = FastOutLinearInEasing))
                 onDismiss()
             }
         }
@@ -1869,12 +1869,12 @@ fun ImagePreviewDialog(
         if (!isClosing) {
             isClosing = true
             coroutineScope.launch {
-                // Distinct delete animation: photo shrinks, sinks down and fades away into trash
-                launch { deleteScale.animateTo(0.6f, tween(durationMillis = 240, easing = FastOutSlowInEasing)) }
-                launch { deleteOffsetY.animateTo(90f, tween(durationMillis = 240, easing = FastOutSlowInEasing)) }
-                launch { deleteAlpha.animateTo(0f, tween(durationMillis = 200, easing = FastOutLinearInEasing)) }
-                launch { fadeAlpha.animateTo(0f, tween(durationMillis = 240, easing = FastOutLinearInEasing)) }
-                kotlinx.coroutines.delay(240)
+                // Distinct snappy delete animation: photo shrinks, sinks down and fades away into trash
+                launch { deleteScale.animateTo(0.65f, tween(durationMillis = 140, easing = FastOutSlowInEasing)) }
+                launch { deleteOffsetY.animateTo(70f, tween(durationMillis = 140, easing = FastOutSlowInEasing)) }
+                launch { deleteAlpha.animateTo(0f, tween(durationMillis = 120, easing = FastOutLinearInEasing)) }
+                launch { fadeAlpha.animateTo(0f, tween(durationMillis = 140, easing = FastOutLinearInEasing)) }
+                kotlinx.coroutines.delay(140)
                 onDelete?.invoke()
                 Toast.makeText(context, "Đã xóa ảnh!", Toast.LENGTH_SHORT).show()
             }
@@ -1889,7 +1889,7 @@ fun ImagePreviewDialog(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             window?.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
             window?.attributes = window?.attributes?.apply {
-                blurBehindRadius = 60
+                blurBehindRadius = 45
             }
         }
         onDispose {}
@@ -1910,7 +1910,7 @@ fun ImagePreviewDialog(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.88f * fadeAlpha.value))
+                .background(Color.Black.copy(alpha = 0.65f * fadeAlpha.value))
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = {
@@ -1973,24 +1973,6 @@ fun ImagePreviewDialog(
                 },
             contentAlignment = Alignment.Center
         ) {
-            // Ambient Blurred Backdrop
-            AsyncImage(
-                model = uri,
-                contentDescription = null,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .blur(40.dp)
-                    .alpha(0.42f * fadeAlpha.value),
-                contentScale = ContentScale.Crop
-            )
-
-            // Vignette dark tint overlay
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.45f * fadeAlpha.value))
-            )
-
             // Main Image with rounded frame that moves and scales strictly with the photo
             Box(
                 modifier = Modifier
