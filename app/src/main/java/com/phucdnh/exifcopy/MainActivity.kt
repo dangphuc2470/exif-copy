@@ -1809,6 +1809,7 @@ fun ImagePreviewDialog(
 ) {
     var scale by remember { mutableStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
+    var imageAspectRatio by remember { mutableStateOf<Float?>(null) }
 
     val view = LocalView.current
     DisposableEffect(view) {
@@ -1875,41 +1876,49 @@ fun ImagePreviewDialog(
                     .background(Color.Black.copy(alpha = 0.45f))
             )
 
-            // Dynamic Frame: starts as rounded rectangle card with padding, expands to full screen on zoom
             val isZoomed = scale > 1.05f
             val cornerRadius by animateDpAsState(
                 targetValue = if (isZoomed) 0.dp else 16.dp,
                 label = "previewCornerRadius"
             )
-            val cardPadding by animateDpAsState(
-                targetValue = if (isZoomed) 0.dp else 24.dp,
-                label = "previewCardPadding"
-            )
 
+            // Main Image Container (Padded when unzoomed so photo sits comfortably in center, full screen when zooming)
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(cardPadding)
-                    .clip(RoundedCornerShape(cornerRadius))
                     .then(
-                        if (!isZoomed) {
-                            Modifier
-                                .border(
-                                    width = 1.dp,
-                                    color = Color.White.copy(alpha = 0.2f),
-                                    shape = RoundedCornerShape(cornerRadius)
-                                )
-                                .shadow(elevation = 16.dp, shape = RoundedCornerShape(cornerRadius))
-                                .background(Color(0xFF141414))
-                        } else Modifier
+                        if (!isZoomed) Modifier.padding(horizontal = 24.dp, vertical = 76.dp)
+                        else Modifier
                     ),
                 contentAlignment = Alignment.Center
             ) {
                 AsyncImage(
                     model = uri,
                     contentDescription = "Full Preview",
+                    onState = { state ->
+                        if (state is coil.compose.AsyncImagePainter.State.Success) {
+                            val size = state.painter.intrinsicSize
+                            if (size.width > 0 && size.height > 0) {
+                                imageAspectRatio = size.width / size.height
+                            }
+                        }
+                    },
                     modifier = Modifier
-                        .fillMaxSize()
+                        .then(
+                            if (imageAspectRatio != null && !isZoomed) {
+                                Modifier
+                                    .aspectRatio(imageAspectRatio!!)
+                                    .shadow(elevation = 16.dp, shape = RoundedCornerShape(cornerRadius))
+                                    .clip(RoundedCornerShape(cornerRadius))
+                                    .border(
+                                        width = 1.dp,
+                                        color = Color.White.copy(alpha = 0.22f),
+                                        shape = RoundedCornerShape(cornerRadius)
+                                    )
+                            } else {
+                                Modifier.fillMaxSize()
+                            }
+                        )
                         .graphicsLayer(
                             scaleX = scale,
                             scaleY = scale,
