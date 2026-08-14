@@ -17,8 +17,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
@@ -29,13 +31,21 @@ import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogWindowProvider
 import android.view.WindowManager
 import androidx.compose.foundation.layout.*
@@ -1807,8 +1817,10 @@ fun ImagePreviewDialog(
     onDismiss: () -> Unit,
     onDelete: (() -> Unit)? = null
 ) {
-    var scale by remember { mutableStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
+    val scaleAnim = remember { Animatable(1f) }
+    val offsetXAnim = remember { Animatable(0f) }
+    val offsetYAnim = remember { Animatable(0f) }
+    val coroutineScope = rememberCoroutineScope()
     var imageAspectRatio by remember { mutableStateOf<Float?>(null) }
 
     val view = LocalView.current
@@ -1838,23 +1850,62 @@ fun ImagePreviewDialog(
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = {
-                            if (scale <= 1.05f) {
+                            if (scaleAnim.value <= 1.05f) {
                                 onDismiss()
                             } else {
-                                scale = 1f
-                                offset = Offset.Zero
+                                coroutineScope.launch {
+                                    launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                    launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                    launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                }
                             }
                         },
                         onDoubleTap = {
-                            if (scale > 1.05f) {
-                                scale = 1f
-                                offset = Offset.Zero
-                            } else {
-                                scale = 2.5f
-                                offset = Offset.Zero
+                            coroutineScope.launch {
+                                if (scaleAnim.value > 1.05f) {
+                                    launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                    launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                    launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                } else {
+                                    launch { scaleAnim.animateTo(2.5f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                }
                             }
                         }
                     )
+                }
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        do {
+                            val event = awaitPointerEvent()
+                            val zoom = event.calculateZoom()
+                            val pan = event.calculatePan()
+
+                            if (zoom != 1f || pan != Offset.Zero) {
+                                val currentScale = scaleAnim.value
+                                val newScale = (currentScale * zoom).coerceIn(0.7f, 8f)
+                                val dampening = if (newScale < 1f) 0.35f else 1f
+                                val newOffsetX = offsetXAnim.value + pan.x * dampening
+                                val newOffsetY = offsetYAnim.value + pan.y * dampening
+
+                                coroutineScope.launch {
+                                    scaleAnim.snapTo(newScale)
+                                    offsetXAnim.snapTo(newOffsetX)
+                                    offsetYAnim.snapTo(newOffsetY)
+                                }
+                                event.changes.forEach { it.consume() }
+                            }
+                        } while (event.changes.any { it.pressed })
+
+                        // When user lifts all fingers: spring smoothly back to 1x center if scale <= 1.05f or below 1x
+                        if (scaleAnim.value <= 1.05f) {
+                            coroutineScope.launch {
+                                launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 340f)) }
+                                launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 340f)) }
+                                launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 340f)) }
+                            }
+                        }
+                    }
                 },
             contentAlignment = Alignment.Center
         ) {
@@ -1876,67 +1927,52 @@ fun ImagePreviewDialog(
                     .background(Color.Black.copy(alpha = 0.45f))
             )
 
-            val isZoomed = scale > 1.05f
-            val cornerRadius by animateDpAsState(
-                targetValue = if (isZoomed) 0.dp else 16.dp,
-                label = "previewCornerRadius"
-            )
-
-            // Main Image Container (Padded when unzoomed so photo sits comfortably in center, full screen when zooming)
+            // Main Image with rounded frame that moves and scales strictly with the photo
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .then(
-                        if (!isZoomed) Modifier.padding(horizontal = 24.dp, vertical = 76.dp)
-                        else Modifier
-                    ),
+                    .padding(horizontal = 24.dp, vertical = 76.dp),
                 contentAlignment = Alignment.Center
             ) {
-                AsyncImage(
-                    model = uri,
-                    contentDescription = "Full Preview",
-                    onState = { state ->
-                        if (state is coil.compose.AsyncImagePainter.State.Success) {
-                            val size = state.painter.intrinsicSize
-                            if (size.width > 0 && size.height > 0) {
-                                imageAspectRatio = size.width / size.height
-                            }
-                        }
-                    },
+                Box(
                     modifier = Modifier
                         .then(
-                            if (imageAspectRatio != null && !isZoomed) {
-                                Modifier
-                                    .aspectRatio(imageAspectRatio!!)
-                                    .shadow(elevation = 16.dp, shape = RoundedCornerShape(cornerRadius))
-                                    .clip(RoundedCornerShape(cornerRadius))
-                                    .border(
-                                        width = 1.dp,
-                                        color = Color.White.copy(alpha = 0.22f),
-                                        shape = RoundedCornerShape(cornerRadius)
-                                    )
+                            if (imageAspectRatio != null) {
+                                Modifier.aspectRatio(imageAspectRatio!!)
                             } else {
                                 Modifier.fillMaxSize()
                             }
                         )
                         .graphicsLayer(
-                            scaleX = scale,
-                            scaleY = scale,
-                            translationX = offset.x,
-                            translationY = offset.y
+                            scaleX = scaleAnim.value,
+                            scaleY = scaleAnim.value,
+                            translationX = offsetXAnim.value,
+                            translationY = offsetYAnim.value,
+                            clip = false
                         )
-                        .pointerInput(Unit) {
-                            detectTransformGestures { _, pan, zoom, _ ->
-                                scale = (scale * zoom).coerceIn(1f, 8f)
-                                if (scale > 1f) {
-                                    offset += pan
-                                } else {
-                                    offset = Offset.Zero
+                        .shadow(elevation = 16.dp, shape = RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(
+                            width = 1.dp,
+                            color = Color.White.copy(alpha = 0.22f),
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                ) {
+                    AsyncImage(
+                        model = uri,
+                        contentDescription = "Full Preview",
+                        onState = { state ->
+                            if (state is coil.compose.AsyncImagePainter.State.Success) {
+                                val size = state.painter.intrinsicSize
+                                if (size.width > 0 && size.height > 0) {
+                                    imageAspectRatio = size.width / size.height
                                 }
                             }
                         },
-                    contentScale = ContentScale.Fit
-                )
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                }
             }
 
             // Top action bar (Pinned outside the scaling layer)
