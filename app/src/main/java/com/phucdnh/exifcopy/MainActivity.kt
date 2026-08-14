@@ -17,6 +17,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -1832,7 +1833,7 @@ fun ImagePreviewDialog(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.92f))
+                .background(Color.Black.copy(alpha = 0.88f))
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = {
@@ -1856,30 +1857,78 @@ fun ImagePreviewDialog(
                 },
             contentAlignment = Alignment.Center
         ) {
-            // Full Screen Zoomable & Pannable Image (Scales entire image freely across screen)
+            // Ambient Blurred Backdrop
             AsyncImage(
                 model = uri,
-                contentDescription = "Full Preview",
+                contentDescription = null,
                 modifier = Modifier
                     .fillMaxSize()
-                    .graphicsLayer(
-                        scaleX = scale,
-                        scaleY = scale,
-                        translationX = offset.x,
-                        translationY = offset.y
-                    )
-                    .pointerInput(Unit) {
-                        detectTransformGestures { _, pan, zoom, _ ->
-                            scale = (scale * zoom).coerceIn(1f, 8f)
-                            if (scale > 1f) {
-                                offset += pan
-                            } else {
-                                offset = Offset.Zero
-                            }
-                        }
-                    },
-                contentScale = ContentScale.Fit
+                    .blur(40.dp)
+                    .alpha(0.42f),
+                contentScale = ContentScale.Crop
             )
+
+            // Vignette dark tint overlay
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.45f))
+            )
+
+            // Dynamic Frame: starts as rounded rectangle card with padding, expands to full screen on zoom
+            val isZoomed = scale > 1.05f
+            val cornerRadius by animateDpAsState(
+                targetValue = if (isZoomed) 0.dp else 16.dp,
+                label = "previewCornerRadius"
+            )
+            val cardPadding by animateDpAsState(
+                targetValue = if (isZoomed) 0.dp else 24.dp,
+                label = "previewCardPadding"
+            )
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(cardPadding)
+                    .clip(RoundedCornerShape(cornerRadius))
+                    .then(
+                        if (!isZoomed) {
+                            Modifier
+                                .border(
+                                    width = 1.dp,
+                                    color = Color.White.copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(cornerRadius)
+                                )
+                                .shadow(elevation = 16.dp, shape = RoundedCornerShape(cornerRadius))
+                                .background(Color(0xFF141414))
+                        } else Modifier
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                AsyncImage(
+                    model = uri,
+                    contentDescription = "Full Preview",
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer(
+                            scaleX = scale,
+                            scaleY = scale,
+                            translationX = offset.x,
+                            translationY = offset.y
+                        )
+                        .pointerInput(Unit) {
+                            detectTransformGestures { _, pan, zoom, _ ->
+                                scale = (scale * zoom).coerceIn(1f, 8f)
+                                if (scale > 1f) {
+                                    offset += pan
+                                } else {
+                                    offset = Offset.Zero
+                                }
+                            }
+                        },
+                    contentScale = ContentScale.Fit
+                )
+            }
 
             // Top action bar (Pinned outside the scaling layer)
             Row(
@@ -1896,7 +1945,7 @@ fun ImagePreviewDialog(
                     onClick = onDismiss,
                     modifier = Modifier.size(42.dp),
                     colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = Color.Black.copy(alpha = 0.6f),
+                        containerColor = Color.Black.copy(alpha = 0.65f),
                         contentColor = Color.White
                     )
                 ) {
