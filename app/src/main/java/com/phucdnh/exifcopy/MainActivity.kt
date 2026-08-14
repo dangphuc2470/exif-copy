@@ -153,6 +153,7 @@ class MainActivity : ComponentActivity() {
                     MainScreen(
                         shareData = shareData,
                         onClearShareData = { shareDataState.value = ShareIntentData() },
+                        isPreviewOpen = (previewState != null),
                         onOpenPreview = { uri, isProcessed, onAction ->
                             previewState = PreviewState(uri, isProcessed, onAction)
                         },
@@ -246,6 +247,7 @@ fun deleteProcessedImage(context: Context, uri: Uri) {
 fun MainScreen(
     shareData: ShareIntentData,
     onClearShareData: () -> Unit,
+    isPreviewOpen: Boolean = false,
     onOpenPreview: (Uri, Boolean, (() -> Unit)?) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1320,16 +1322,18 @@ fun MainScreen(
         // SETTINGS DIALOG
         // -----------------------------------------------------------------
         if (showSettingsDialog) {
-            SettingsDialog(
-                currentSettings = exifSettings,
-                onDismiss = { showSettingsDialog = false },
-                onSave = {
-                    exifSettings = it
-                    showSettingsDialog = false
-                    Toast.makeText(context, Strings.updatedSettings(isVi), Toast.LENGTH_SHORT).show()
-                },
-                isVi = isVi
-            )
+            Box(modifier = Modifier.blur(if (isPreviewOpen) 24.dp else 0.dp)) {
+                SettingsDialog(
+                    currentSettings = exifSettings,
+                    onDismiss = { showSettingsDialog = false },
+                    onSave = {
+                        exifSettings = it
+                        showSettingsDialog = false
+                        Toast.makeText(context, Strings.updatedSettings(isVi), Toast.LENGTH_SHORT).show()
+                    },
+                    isVi = isVi
+                )
+            }
         }
 
         // -----------------------------------------------------------------
@@ -1406,6 +1410,7 @@ fun MainScreen(
         // -----------------------------------------------------------------
         if (shareData.uris.isNotEmpty() && shareData.targetType == ShareTargetType.DEFAULT) {
             AlertDialog(
+                modifier = Modifier.blur(if (isPreviewOpen) 24.dp else 0.dp),
                 onDismissRequest = onClearShareData,
                 title = { Text(Strings.externalShareTitle(isVi)) },
                 text = { Text(Strings.externalShareMsg(isVi, shareData.uris.size)) },
@@ -1449,6 +1454,7 @@ fun MainScreen(
         // -----------------------------------------------------------------
         if (showOpenImageDialog && singleResultUri != null) {
             AlertDialog(
+                modifier = Modifier.blur(if (isPreviewOpen) 24.dp else 0.dp),
                 onDismissRequest = { showOpenImageDialog = false },
                 title = { Text(Strings.completionDialogTitle(isVi), fontWeight = FontWeight.Bold) },
                 text = {
