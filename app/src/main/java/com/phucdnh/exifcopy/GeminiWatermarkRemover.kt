@@ -162,35 +162,53 @@ object GeminiWatermarkRemover {
         return sobelMagnitude(absAlpha, size, size)
     }
 
-    private fun scoreCandidateRegion(
+    private fun scoreZeroMeanCrossCorrelation(
         gray: FloatArray,
-        grad: FloatArray,
         imageWidth: Int,
         imageHeight: Int,
         x: Int,
         y: Int,
         size: Int,
-        bufAlpha: FloatArray,
-        templateGrad: FloatArray,
-        bufGray: FloatArray,
-        bufGrad: FloatArray
+        alphaMap: FloatArray,
+        tMean: Float,
+        tNorm: Float
     ): Float {
-        if (x < 0 || y < 0 || x + size > imageWidth || y + size > imageHeight) return 0f
+        if (x < 0 || y < 0 || x + size > imageWidth || y + size > imageHeight) return -1f
+        var count = 0
+        var subSum = 0f
 
-        val len = size * size
         for (row in 0 until size) {
-            val srcIdx = (y + row) * imageWidth + x
-            val dstIdx = row * size
+            val offset = (y + row) * imageWidth + x
+            val aOffset = row * size
             for (col in 0 until size) {
-                bufGray[dstIdx + col] = gray[srcIdx + col]
-                bufGrad[dstIdx + col] = grad[srcIdx + col]
+                if (alphaMap[aOffset + col] > 0.01f) {
+                    subSum += gray[offset + col]
+                    count++
+                }
             }
         }
+        if (count < 10) return -1f
+        val subMean = subSum / count
 
-        val spatialScore = abs(normalizedCrossCorrelation(bufGray, bufAlpha, len))
-        val gradientScore = abs(normalizedCrossCorrelation(bufGrad, templateGrad, len))
+        var subNormSq = 0f
+        var crossSum = 0f
 
-        return (spatialScore * 0.5f + gradientScore * 0.5f).coerceIn(0f, 1f)
+        for (row in 0 until size) {
+            val offset = (y + row) * imageWidth + x
+            val aOffset = row * size
+            for (col in 0 until size) {
+                val a = alphaMap[aOffset + col]
+                if (a > 0.01f) {
+                    val diffS = gray[offset + col] - subMean
+                    subNormSq += diffS * diffS
+                    crossSum += (a - tMean) * diffS
+                }
+            }
+        }
+        val subNorm = kotlin.math.sqrt(subNormSq)
+        if (subNorm < 1e-5f) return -1f
+
+        return crossSum / (tNorm * subNorm)
     }
 
     private fun normalizedCrossCorrelation(a: FloatArray, b: FloatArray, length: Int): Float {
@@ -208,10 +226,6 @@ object GeminiWatermarkRemover {
         return cov / den
     }
 
-    /**
-     * Multi-scale Bottom-Right Quadrant Scan searching catalog seeds and logo sizes.
-     * Evaluates exact catalog positions directly on pixel coordinates for 100% accuracy.
-     */
     fun findWatermarkMatch(bitmap: Bitmap): DetectionMatch? {
         val width = bitmap.width
         val height = bitmap.height
@@ -222,8 +236,10 @@ object GeminiWatermarkRemover {
 
     fun findWatermarkMatch(pixels: IntArray, imageWidth: Int, imageHeight: Int): DetectionMatch? {
         val fullGray = FloatArray(imageWidth * imageHeight)
-        val startX = (imageWidth * 0.50f).roundToInt().coerceAtLeast(0)
-        val startY = (imageHeight * 0.50f).roundToInt().coerceAtLeast(0)
+        val searchW = min(imageWidth, 360)
+        val searchH = min(imageHeight, 360)
+        val startX = imageWidth - searchW
+        val startY = imageHeight - searchH
 
         for (y in startY until imageHeight) {
             val offset = y * imageWidth
@@ -236,161 +252,101 @@ object GeminiWatermarkRemover {
                 fullGray[idx] = (0.2126f * r + 0.7152f * g + 0.0722f * b) / 255f
             }
         }
-        val fullGrad = sobelMagnitude(fullGray, imageWidth, imageHeight)
-
-        val longSide = max(imageWidth, imageHeight)
-        val scale2k = longSide.toFloat() / 2048f
-        val scale1k = longSide.toFloat() / 1024f
-        val scale640 = longSide.toFloat() / 640f
-
-        val catalogSeeds = listOf(
-            Triple(24, 44, 44),  // Scaled / QuickShare small star 24px seed (44px margin)
-            Triple(24, 48, 48),  // Scaled / QuickShare small star 24px seed (48px margin)
-            Triple(24, 32, 32),  // Small star 24px seed (32px margin)
-            Triple(20, 44, 44),  // Micro star 20px seed (44px margin)
-            Triple(20, 48, 48),  // Micro star 20px seed (48px margin)
-            Triple(32, 44, 44),  // Scaled / QuickShare small star 32px seed (44px margin)
-            Triple(32, 48, 48),  // Scaled / QuickShare small star 32px seed (48px margin)
-            Triple(48, 32, 32),  // Standard Gemini 48px seed (32px margin)
-            Triple(32, 32, 32),  // Small Gemini 32px seed (32px margin)
-            Triple(48, 96, 96),  // Standard Gemini 48px seed (96px margin)
-            Triple(96, 64, 64),  // Standard Gemini 96px seed (64px margin)
-            Triple(48, 64, 64),  // Standard Gemini 48px seed (64px margin)
-            Triple(96, 192, 192),// Standard Gemini 96px large margin
-            Triple(36, 96, 96),  // Standard Gemini 36px v2 seed
-            Triple((48f * scale640).roundToInt().coerceIn(16, 128), (32f * scale640).roundToInt().coerceIn(12, 128), (32f * scale640).roundToInt().coerceIn(12, 128)),
-            Triple((36f * scale640).roundToInt().coerceIn(16, 128), (32f * scale640).roundToInt().coerceIn(12, 128), (32f * scale640).roundToInt().coerceIn(12, 128)),
-            Triple((96f * scale2k).roundToInt().coerceIn(16, 256), (64f * scale2k).roundToInt().coerceIn(12, 256), (64f * scale2k).roundToInt().coerceIn(12, 256)),
-            Triple((48f * scale1k).roundToInt().coerceIn(16, 128), (96f * scale1k).roundToInt().coerceIn(12, 256), (96f * scale1k).roundToInt().coerceIn(12, 256)),
-            Triple((48f * scale1k).roundToInt().coerceIn(16, 128), (48f * scale1k).roundToInt().coerceIn(12, 256), (48f * scale1k).roundToInt().coerceIn(12, 256)),
-            Triple((36f * scale1k).roundToInt().coerceIn(16, 96), (36f * scale1k).roundToInt().coerceIn(12, 256), (36f * scale1k).roundToInt().coerceIn(12, 256))
-        )
-
-        var bestSeedScore = -1.0f
-        var bestSeedMatch: DetectionMatch? = null
-
-        for ((size, marginR, marginB) in catalogSeeds) {
-            if (size >= imageWidth || size >= imageHeight) continue
-            val seedX = imageWidth - marginR - size
-            val seedY = imageHeight - marginB - size
-            if (seedX < 0 || seedY < 0) continue
-
-            val alphaMap = getAlphaMapForSize(size)
-            val templateGrad = getTemplateGradForSize(size)
-            val bufAlpha = FloatArray(size * size) { abs(alphaMap[it]) }
-            val bufGray = FloatArray(size * size)
-            val bufGrad = FloatArray(size * size)
-
-            val searchRadius = (size / 2).coerceIn(16, 40)
-            for (dy in -searchRadius..searchRadius step 2) {
-                val fy = (seedY + dy).coerceIn(0, imageHeight - size)
-                for (dx in -searchRadius..searchRadius step 2) {
-                    val fx = (seedX + dx).coerceIn(0, imageWidth - size)
-                    val score = scoreCandidateRegion(
-                        fullGray, fullGrad, imageWidth, imageHeight, fx, fy, size, bufAlpha, templateGrad,
-                        bufGray, bufGrad
-                    )
-                    if (score > bestSeedScore) {
-                        bestSeedScore = score
-                        bestSeedMatch = DetectionMatch(fx, fy, size, size, score, "CatalogSeed_${size}")
-                    }
-                }
-            }
-        }
-
-        if (bestSeedMatch != null && bestSeedScore >= 0.20f) {
-            return bestSeedMatch
-        }
-
-        return scanWatermarkOnPixels(pixels, imageWidth, imageHeight)
-    }
-
-    private fun scanWatermarkOnPixels(pixels: IntArray, imageWidth: Int, imageHeight: Int): DetectionMatch? {
-        val fullGray = FloatArray(imageWidth * imageHeight)
-        for (i in pixels.indices) {
-            val pixel = pixels[i]
-            val r = (pixel shr 16) and 0xFF
-            val g = (pixel shr 8) and 0xFF
-            val b = pixel and 0xFF
-            fullGray[i] = (0.2126f * r + 0.7152f * g + 0.0722f * b) / 255f
-        }
-        val fullGrad = sobelMagnitude(fullGray, imageWidth, imageHeight)
 
         val logoSizesToTest = intArrayOf(24, 28, 32, 36, 40, 48, 56, 64, 72, 80, 96, 112, 128)
-
-        var bestScore = -1.0f
+        var bestScore = -999.0f
         var bestMatch: DetectionMatch? = null
 
-        val startX = (imageWidth * 0.50f).roundToInt().coerceAtLeast(0)
-        val startY = (imageHeight * 0.50f).roundToInt().coerceAtLeast(0)
-
         for (size in logoSizesToTest) {
-            if (size >= imageWidth || size >= imageHeight) continue
-
+            if (size >= searchW || size >= searchH) continue
             val alphaMap = getAlphaMapForSize(size)
-            val templateGrad = getTemplateGradForSize(size)
-            val bufAlpha = FloatArray(size * size) { abs(alphaMap[it]) }
+
+            var tSum = 0f
+            var tCount = 0
+            for (v in alphaMap) {
+                if (v > 0.01f) {
+                    tSum += v
+                    tCount++
+                }
+            }
+            if (tCount < 10) continue
+            val tMean = tSum / tCount
+
+            var tNormSq = 0f
+            for (v in alphaMap) {
+                if (v > 0.01f) {
+                    val dt = v - tMean
+                    tNormSq += dt * dt
+                }
+            }
+            val tNorm = kotlin.math.sqrt(tNormSq)
+            if (tNorm < 1e-5f) continue
 
             val maxX = imageWidth - size
             val maxY = imageHeight - size
+            val coarseStep = if (size >= 48) 2 else 1
 
-            val stepCoarse = (size / 4).coerceIn(8, 16)
-
-            var coarseBestX = maxX
-            var coarseBestY = maxY
-            var coarseBestScore = -1.0f
-
-            val bufGray = FloatArray(size * size)
-            val bufGrad = FloatArray(size * size)
-
-            for (cy in startY..maxY step stepCoarse) {
-                for (cx in startX..maxX step stepCoarse) {
-                    val score = scoreCandidateRegion(
-                        fullGray, fullGrad, imageWidth, imageHeight, cx, cy, size, bufAlpha, templateGrad,
-                        bufGray, bufGrad
+            for (cy in startY..maxY step coarseStep) {
+                for (cx in startX..maxX step coarseStep) {
+                    val score = scoreZeroMeanCrossCorrelation(
+                        fullGray, imageWidth, imageHeight, cx, cy, size, alphaMap, tMean, tNorm
                     )
-                    if (score > coarseBestScore) {
-                        coarseBestScore = score
-                        coarseBestX = cx
-                        coarseBestY = cy
+                    if (score > bestScore) {
+                        bestScore = score
+                        bestMatch = DetectionMatch(cx, cy, size, size, score, "Size_${size}")
+                    }
+                }
+            }
+        }
+
+        // Fine-tune with step 1 in [-4..4] around the best coarse candidate
+        if (bestMatch != null && bestMatch.score > 0.10f) {
+            val bx = bestMatch.x
+            val by = bestMatch.y
+            val bSize = bestMatch.width
+            val alphaMap = getAlphaMapForSize(bSize)
+
+            var tSum = 0f
+            var tCount = 0
+            for (v in alphaMap) {
+                if (v > 0.01f) {
+                    tSum += v
+                    tCount++
+                }
+            }
+            val tMean = if (tCount > 0) tSum / tCount else 0f
+            var tNormSq = 0f
+            for (v in alphaMap) {
+                if (v > 0.01f) {
+                    val dt = v - tMean
+                    tNormSq += dt * dt
+                }
+            }
+            val tNorm = kotlin.math.sqrt(tNormSq)
+
+            var fineBestScore = bestMatch.score
+            var fineBestX = bx
+            var fineBestY = by
+
+            val maxX = imageWidth - bSize
+            val maxY = imageHeight - bSize
+
+            for (dy in -4..4) {
+                val fy = (by + dy).coerceIn(0, maxY)
+                for (dx in -4..4) {
+                    val fx = (bx + dx).coerceIn(0, maxX)
+                    val score = scoreZeroMeanCrossCorrelation(
+                        fullGray, imageWidth, imageHeight, fx, fy, bSize, alphaMap, tMean, tNorm
+                    )
+                    if (score > fineBestScore) {
+                        fineBestScore = score
+                        fineBestX = fx
+                        fineBestY = fy
                     }
                 }
             }
 
-            var fineBestX = coarseBestX
-            var fineBestY = coarseBestY
-            var fineBestScore = coarseBestScore
-
-            if (coarseBestScore >= 0.05f) {
-                for (dy in -8..8) {
-                    val fy = (coarseBestY + dy).coerceIn(0, maxY)
-                    for (dx in -8..8) {
-                        val fx = (coarseBestX + dx).coerceIn(0, maxX)
-
-                        val score = scoreCandidateRegion(
-                            fullGray, fullGrad, imageWidth, imageHeight, fx, fy, size, bufAlpha, templateGrad,
-                            bufGray, bufGrad
-                        )
-                        if (score > fineBestScore) {
-                            fineBestScore = score
-                            fineBestX = fx
-                            fineBestY = fy
-                        }
-                    }
-                }
-            }
-
-            if (fineBestScore > bestScore) {
-                bestScore = fineBestScore
-                bestMatch = DetectionMatch(
-                    x = fineBestX,
-                    y = fineBestY,
-                    width = size,
-                    height = size,
-                    score = fineBestScore,
-                    presetName = "Size_${size}_MultiScale"
-                )
-            }
+            return DetectionMatch(fineBestX, fineBestY, bSize, bSize, fineBestScore, "Fine_${bSize}")
         }
 
         return bestMatch
@@ -804,16 +760,15 @@ object GeminiWatermarkRemover {
             DetectionMatch(fbX, fbY, fallbackSize, fallbackSize, match?.score ?: 0f, "Fallback_Standard")
         }
 
-        val alphaScale = estimateWatermarkAlphaScale(pixels, width, height, targetMatch.x, targetMatch.y, targetMatch.width)
-        Log.d(TAG, "Selected watermark target: $targetMatch, mode: $mode, alphaScale: $alphaScale")
         val alphaMap = getAlphaMapForSize(targetMatch.width)
+        Log.d(TAG, "Selected watermark target: $targetMatch, mode: $mode")
 
         when (mode) {
             WatermarkMode.REVERSE_ALPHA -> {
-                reverseAlphaBlendRegion(pixels, width, alphaMap, targetMatch.x, targetMatch.y, targetMatch.width, targetMatch.height, alphaScale)
+                reverseAlphaBlendRegion(pixels, width, alphaMap, targetMatch.x, targetMatch.y, targetMatch.width, targetMatch.height, 1.0f)
             }
             WatermarkMode.IDW_INPAINT -> {
-                idwInpaintRegion(pixels, width, alphaMap, targetMatch.x, targetMatch.y, targetMatch.width, targetMatch.height, alphaScale)
+                idwInpaintRegion(pixels, width, alphaMap, targetMatch.x, targetMatch.y, targetMatch.width, targetMatch.height, 1.0f)
             }
             WatermarkMode.OPENCV_INPAINT -> {
                 teleaInpaintRegion(pixels, width, height, targetMatch.x, targetMatch.y, targetMatch.width, targetMatch.height, alphaMap)
