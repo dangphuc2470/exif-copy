@@ -2005,14 +2005,8 @@ fun ImagePreviewDialog(
                                                 launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
                                                 launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
                                             }
-                                        } else {
-                                            coroutineScope.launch {
-                                                kotlinx.coroutines.delay(280)
-                                                if (lastTapTime == now && scaleAnim.value <= 1.05f) {
-                                                    handleDismiss()
-                                                }
-                                            }
                                         }
+                                        // At 1x: Single tap on the photo stays open, waiting for double tap
                                     }
                                 } else if (scaleAnim.value <= 1.05f) {
                                     coroutineScope.launch {
