@@ -37,6 +37,7 @@ import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
@@ -1911,20 +1912,22 @@ fun ImagePreviewDialog(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = 0.45f * fadeAlpha.value))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) {
+                    // Instant zero-delay dismiss when tapping outside the photo
+                    handleDismiss()
+                }
                 .pointerInput(Unit) {
                     awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        val downTime = System.currentTimeMillis()
-                        var hasTransform = false
-                        val startScale = scaleAnim.value
-
+                        awaitFirstDown(requireUnconsumed = false)
                         do {
                             val event = awaitPointerEvent()
                             val zoom = event.calculateZoom()
                             val pan = event.calculatePan()
 
                             if (zoom != 1f || pan.getDistance() > 2f) {
-                                hasTransform = true
                                 val currentScale = scaleAnim.value
                                 val newScale = (currentScale * zoom).coerceIn(0.7f, 8f)
                                 val dampening = if (newScale < 1f) 0.35f else 1f
@@ -1940,19 +1943,8 @@ fun ImagePreviewDialog(
                             }
                         } while (event.changes.any { it.pressed })
 
-                        val elapsed = System.currentTimeMillis() - downTime
-                        if (!hasTransform && elapsed < 350) {
-                            // Instant zero-delay tap on finger up!
-                            if (startScale <= 1.05f) {
-                                handleDismiss()
-                            } else {
-                                coroutineScope.launch {
-                                    launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                    launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                    launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                }
-                            }
-                        } else if (scaleAnim.value <= 1.05f) {
+                        // When user lifts all fingers: spring smoothly back to 1x center if scale <= 1.05f or below 1x
+                        if (scaleAnim.value <= 1.05f) {
                             coroutineScope.launch {
                                 launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 340f)) }
                                 launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 340f)) }
@@ -1994,6 +1986,32 @@ fun ImagePreviewDialog(
                             color = Color.White.copy(alpha = 0.22f),
                             shape = RoundedCornerShape(16.dp)
                         )
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onDoubleTap = {
+                                    coroutineScope.launch {
+                                        if (scaleAnim.value > 1.05f) {
+                                            launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                            launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                            launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                        } else {
+                                            launch { scaleAnim.animateTo(2.5f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                        }
+                                    }
+                                },
+                                onTap = {
+                                    if (scaleAnim.value <= 1.05f) {
+                                        handleDismiss()
+                                    } else {
+                                        coroutineScope.launch {
+                                            launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                            launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                            launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                        }
+                                    }
+                                }
+                            )
+                        }
                 ) {
                     AsyncImage(
                         model = uri,
