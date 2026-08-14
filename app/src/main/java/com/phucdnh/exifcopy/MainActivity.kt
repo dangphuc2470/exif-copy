@@ -78,6 +78,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
@@ -1909,17 +1910,76 @@ fun ImagePreviewDialog(
         }
 
         var lastTapTime by remember { mutableStateOf(0L) }
+        var photoRect by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
 
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = 0.45f * fadeAlpha.value))
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) {
-                    // Instant zero-delay dismiss when tapping outside the photo
-                    handleDismiss()
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val downPos = down.position
+                        val downTime = System.currentTimeMillis()
+                        var hasTransform = false
+
+                        do {
+                            val event = awaitPointerEvent()
+                            val zoom = event.calculateZoom()
+                            val pan = event.calculatePan()
+
+                            if (zoom != 1f || pan.getDistance() > 2f) {
+                                hasTransform = true
+                                val currentScale = scaleAnim.value
+                                val newScale = (currentScale * zoom).coerceIn(0.7f, 8f)
+                                val dampening = if (newScale < 1f) 0.35f else 1f
+                                // Pan speed normalized to scale: slower when zoomed in feels natural
+                                val panFactor = dampening / currentScale.coerceAtLeast(1f)
+                                val newOffsetX = offsetXAnim.value + pan.x * panFactor * currentScale
+                                val newOffsetY = offsetYAnim.value + pan.y * panFactor * currentScale
+
+                                coroutineScope.launch {
+                                    scaleAnim.snapTo(newScale)
+                                    offsetXAnim.snapTo(newOffsetX)
+                                    offsetYAnim.snapTo(newOffsetY)
+                                }
+                                event.changes.forEach { it.consume() }
+                            }
+                        } while (event.changes.any { it.pressed })
+
+                        val elapsed = System.currentTimeMillis() - downTime
+                        if (!hasTransform && elapsed < 320) {
+                            val rect = photoRect
+                            val isOnPhoto = rect != null && rect.contains(downPos)
+
+                            val now = System.currentTimeMillis()
+                            if (isOnPhoto && now - lastTapTime < 320) {
+                                // Double tap on photo -> toggle zoom
+                                lastTapTime = 0L
+                                coroutineScope.launch {
+                                    if (scaleAnim.value > 1.05f) {
+                                        launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                        launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                        launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                    } else {
+                                        launch { scaleAnim.animateTo(2.5f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                    }
+                                }
+                            } else if (isOnPhoto) {
+                                // First tap on photo: just record time, do nothing
+                                lastTapTime = now
+                            } else {
+                                // Tap on background -> dismiss instantly
+                                handleDismiss()
+                            }
+                        } else if (scaleAnim.value <= 1.05f && hasTransform) {
+                            coroutineScope.launch {
+                                launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 340f)) }
+                                launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 340f)) }
+                                launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 340f)) }
+                            }
+                        }
+                    }
                 },
             contentAlignment = Alignment.Center
         ) {
@@ -1954,61 +2014,8 @@ fun ImagePreviewDialog(
                             color = Color.White.copy(alpha = 0.22f),
                             shape = RoundedCornerShape(16.dp)
                         )
-                        .pointerInput(Unit) {
-                            awaitEachGesture {
-                                val down = awaitFirstDown(requireUnconsumed = false)
-                                val downTime = System.currentTimeMillis()
-                                var hasTransform = false
-
-                                do {
-                                    val event = awaitPointerEvent()
-                                    val zoom = event.calculateZoom()
-                                    val pan = event.calculatePan()
-
-                                    if (zoom != 1f || pan.getDistance() > 2f) {
-                                        hasTransform = true
-                                        val currentScale = scaleAnim.value
-                                        val newScale = (currentScale * zoom).coerceIn(0.7f, 8f)
-                                        val dampening = if (newScale < 1f) 0.35f else 1f
-                                        val newOffsetX = offsetXAnim.value + pan.x * dampening
-                                        val newOffsetY = offsetYAnim.value + pan.y * dampening
-
-                                        coroutineScope.launch {
-                                            scaleAnim.snapTo(newScale)
-                                            offsetXAnim.snapTo(newOffsetX)
-                                            offsetYAnim.snapTo(newOffsetY)
-                                        }
-                                        event.changes.forEach { it.consume() }
-                                    }
-                                } while (event.changes.any { it.pressed })
-
-                                val elapsed = System.currentTimeMillis() - downTime
-                                if (!hasTransform && elapsed < 320) {
-                                    val now = System.currentTimeMillis()
-                                    if (now - lastTapTime < 320) {
-                                        // Double tap!
-                                        lastTapTime = 0L
-                                        coroutineScope.launch {
-                                            if (scaleAnim.value > 1.05f) {
-                                                launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                                launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                                launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                            } else {
-                                                launch { scaleAnim.animateTo(2.5f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                            }
-                                        }
-                                    } else {
-                                        lastTapTime = now
-                                        // Single tap on photo does nothing (only double-tap toggles zoom)
-                                    }
-                                } else if (scaleAnim.value <= 1.05f) {
-                                    coroutineScope.launch {
-                                        launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 340f)) }
-                                        launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 340f)) }
-                                        launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 340f)) }
-                                    }
-                                }
-                            }
+                        .onGloballyPositioned { coords ->
+                            photoRect = coords.boundsInRoot()
                         }
                 ) {
                     AsyncImage(
