@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -1226,7 +1227,7 @@ fun MainScreen(
                                         }
                                     },
                                     modifier = Modifier.fillMaxWidth(),
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                                 ) {
                                     Icon(Icons.Default.Delete, contentDescription = null)
                                     Spacer(modifier = Modifier.width(8.dp))
@@ -1817,11 +1818,32 @@ fun ImagePreviewDialog(
     onDismiss: () -> Unit,
     onDelete: (() -> Unit)? = null
 ) {
+    val context = LocalContext.current
     val scaleAnim = remember { Animatable(1f) }
     val offsetXAnim = remember { Animatable(0f) }
     val offsetYAnim = remember { Animatable(0f) }
+    val entranceAnim = remember { Animatable(0f) }
     val coroutineScope = rememberCoroutineScope()
-    var imageAspectRatio by remember { mutableStateOf<Float?>(null) }
+
+    // Pre-calculate exact aspect ratio synchronously from image header to eliminate initial layout flash
+    val initialAspect = remember(uri) {
+        try {
+            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, options)
+            }
+            if (options.outWidth > 0 && options.outHeight > 0) {
+                options.outWidth.toFloat() / options.outHeight.toFloat()
+            } else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+    var imageAspectRatio by remember(uri) { mutableStateOf(initialAspect) }
+
+    LaunchedEffect(Unit) {
+        entranceAnim.animateTo(1f, spring(dampingRatio = 0.85f, stiffness = 420f))
+    }
 
     val view = LocalView.current
     DisposableEffect(view) {
@@ -1846,7 +1868,7 @@ fun ImagePreviewDialog(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.88f))
+                .background(Color.Black.copy(alpha = 0.88f * entranceAnim.value))
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = {
@@ -1916,7 +1938,7 @@ fun ImagePreviewDialog(
                 modifier = Modifier
                     .fillMaxSize()
                     .blur(40.dp)
-                    .alpha(0.42f),
+                    .alpha(0.42f * entranceAnim.value),
                 contentScale = ContentScale.Crop
             )
 
@@ -1924,7 +1946,7 @@ fun ImagePreviewDialog(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.45f))
+                    .background(Color.Black.copy(alpha = 0.45f * entranceAnim.value))
             )
 
             // Main Image with rounded frame that moves and scales strictly with the photo
@@ -1944,8 +1966,9 @@ fun ImagePreviewDialog(
                             }
                         )
                         .graphicsLayer(
-                            scaleX = scaleAnim.value,
-                            scaleY = scaleAnim.value,
+                            scaleX = scaleAnim.value * (0.92f + 0.08f * entranceAnim.value),
+                            scaleY = scaleAnim.value * (0.92f + 0.08f * entranceAnim.value),
+                            alpha = entranceAnim.value,
                             translationX = offsetXAnim.value,
                             translationY = offsetYAnim.value,
                             clip = false
