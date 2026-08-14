@@ -13,15 +13,20 @@ import android.provider.MediaStore
 import android.widget.Toast
 import org.json.JSONArray
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
@@ -1822,8 +1827,12 @@ fun ImagePreviewDialog(
     val scaleAnim = remember { Animatable(1f) }
     val offsetXAnim = remember { Animatable(0f) }
     val offsetYAnim = remember { Animatable(0f) }
-    val entranceAnim = remember { Animatable(0f) }
+    val fadeAlpha = remember { Animatable(0f) }
+    val deleteScale = remember { Animatable(1f) }
+    val deleteOffsetY = remember { Animatable(0f) }
+    val deleteAlpha = remember { Animatable(1f) }
     val coroutineScope = rememberCoroutineScope()
+    var isClosing by remember { mutableStateOf(false) }
 
     // Pre-calculate exact aspect ratio synchronously from image header to eliminate initial layout flash
     val initialAspect = remember(uri) {
@@ -1841,13 +1850,42 @@ fun ImagePreviewDialog(
     }
     var imageAspectRatio by remember(uri) { mutableStateOf(initialAspect) }
 
+    // Pure fade-in on enter
     LaunchedEffect(Unit) {
-        entranceAnim.animateTo(1f, spring(dampingRatio = 0.85f, stiffness = 420f))
+        fadeAlpha.animateTo(1f, tween(durationMillis = 200, easing = LinearOutSlowInEasing))
+    }
+
+    val handleDismiss = {
+        if (!isClosing) {
+            isClosing = true
+            coroutineScope.launch {
+                fadeAlpha.animateTo(0f, tween(durationMillis = 180, easing = FastOutLinearInEasing))
+                onDismiss()
+            }
+        }
+    }
+
+    val handleDelete = {
+        if (!isClosing) {
+            isClosing = true
+            coroutineScope.launch {
+                // Distinct delete animation: photo shrinks, sinks down and fades away into trash
+                launch { deleteScale.animateTo(0.6f, tween(durationMillis = 240, easing = FastOutSlowInEasing)) }
+                launch { deleteOffsetY.animateTo(90f, tween(durationMillis = 240, easing = FastOutSlowInEasing)) }
+                launch { deleteAlpha.animateTo(0f, tween(durationMillis = 200, easing = FastOutLinearInEasing)) }
+                launch { fadeAlpha.animateTo(0f, tween(durationMillis = 240, easing = FastOutLinearInEasing)) }
+                kotlinx.coroutines.delay(240)
+                onDelete?.invoke()
+                Toast.makeText(context, "Đã xóa ảnh!", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     val view = LocalView.current
     DisposableEffect(view) {
         val window = (view.parent as? DialogWindowProvider)?.window
+        // Disable Android OS default slide/pop animation completely
+        window?.setWindowAnimations(0)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             window?.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
             window?.attributes = window?.attributes?.apply {
@@ -1858,22 +1896,26 @@ fun ImagePreviewDialog(
     }
 
     androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { handleDismiss() },
         properties = androidx.compose.ui.window.DialogProperties(
             usePlatformDefaultWidth = false,
-            dismissOnBackPress = true,
-            dismissOnClickOutside = true
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false
         )
     ) {
+        BackHandler {
+            handleDismiss()
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.88f * entranceAnim.value))
+                .background(Color.Black.copy(alpha = 0.88f * fadeAlpha.value))
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = {
                             if (scaleAnim.value <= 1.05f) {
-                                onDismiss()
+                                handleDismiss()
                             } else {
                                 coroutineScope.launch {
                                     launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
@@ -1938,7 +1980,7 @@ fun ImagePreviewDialog(
                 modifier = Modifier
                     .fillMaxSize()
                     .blur(40.dp)
-                    .alpha(0.42f * entranceAnim.value),
+                    .alpha(0.42f * fadeAlpha.value),
                 contentScale = ContentScale.Crop
             )
 
@@ -1946,7 +1988,7 @@ fun ImagePreviewDialog(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.45f * entranceAnim.value))
+                    .background(Color.Black.copy(alpha = 0.45f * fadeAlpha.value))
             )
 
             // Main Image with rounded frame that moves and scales strictly with the photo
@@ -1966,11 +2008,11 @@ fun ImagePreviewDialog(
                             }
                         )
                         .graphicsLayer(
-                            scaleX = scaleAnim.value * (0.92f + 0.08f * entranceAnim.value),
-                            scaleY = scaleAnim.value * (0.92f + 0.08f * entranceAnim.value),
-                            alpha = entranceAnim.value,
+                            scaleX = scaleAnim.value * deleteScale.value,
+                            scaleY = scaleAnim.value * deleteScale.value,
+                            alpha = fadeAlpha.value * deleteAlpha.value,
                             translationX = offsetXAnim.value,
-                            translationY = offsetYAnim.value,
+                            translationY = offsetYAnim.value + deleteOffsetY.value,
                             clip = false
                         )
                         .shadow(elevation = 16.dp, shape = RoundedCornerShape(16.dp))
@@ -2004,13 +2046,14 @@ fun ImagePreviewDialog(
                     .fillMaxWidth()
                     .align(Alignment.TopCenter)
                     .statusBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 16.dp),
+                    .padding(horizontal = 16.dp, vertical = 16.dp)
+                    .alpha(fadeAlpha.value),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Close button
                 FilledIconButton(
-                    onClick = onDismiss,
+                    onClick = { handleDismiss() },
                     modifier = Modifier.size(42.dp),
                     colors = IconButtonDefaults.filledIconButtonColors(
                         containerColor = Color.Black.copy(alpha = 0.65f),
@@ -2026,12 +2069,8 @@ fun ImagePreviewDialog(
 
                 // Delete button
                 if (onDelete != null) {
-                    val context = LocalContext.current
                     FilledIconButton(
-                        onClick = {
-                            onDelete()
-                            Toast.makeText(context, "Đã xóa ảnh!", Toast.LENGTH_SHORT).show()
-                        },
+                        onClick = { handleDelete() },
                         modifier = Modifier.size(42.dp),
                         colors = IconButtonDefaults.filledIconButtonColors(
                             containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.85f),
