@@ -1916,6 +1916,10 @@ fun ImagePreviewDialog(
         }
     }
 
+    val prefs = remember { context.getSharedPreferences("exif_copy_prefs", Context.MODE_PRIVATE) }
+    val appLanguage = remember { prefs.getString("app_language", AppLanguage.SYSTEM.code) ?: AppLanguage.SYSTEM.code }
+    val isVi = remember(appLanguage) { Strings.isVietnamese(appLanguage) }
+
     val handleAction = {
         if (!isClosing) {
             isClosing = true
@@ -1927,7 +1931,11 @@ fun ImagePreviewDialog(
                 launch { fadeAlpha.animateTo(0f, tween(durationMillis = 140, easing = FastOutLinearInEasing)) }
                 kotlinx.coroutines.delay(140)
                 onAction?.invoke()
-                val msg = if (isProcessed) "Đã xóa ảnh!" else "Đã bỏ khỏi danh sách!"
+                val msg = if (isProcessed) {
+                    if (isVi) "Đã xóa tệp ảnh khỏi thiết bị!" else "Deleted image file!"
+                } else {
+                    if (isVi) "Đã bỏ ảnh khỏi danh sách!" else "Removed image from list!"
+                }
                 Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
             }
         }
@@ -2141,7 +2149,7 @@ fun ImagePreviewDialog(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
-                        contentDescription = "Đóng",
+                        contentDescription = if (isVi) "Đóng" else "Close",
                         modifier = Modifier.size(22.dp)
                     )
                 }
@@ -2152,14 +2160,17 @@ fun ImagePreviewDialog(
                         onClick = { handleAction() },
                         modifier = Modifier.size(42.dp),
                         colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = if (isProcessed) MaterialTheme.colorScheme.error.copy(alpha = 0.85f)
-                                             else Color.Black.copy(alpha = 0.65f),
-                            contentColor = if (isProcessed) MaterialTheme.colorScheme.onError else Color.White
+                            containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.85f),
+                            contentColor = MaterialTheme.colorScheme.onError
                         )
                     ) {
                         Icon(
-                            imageVector = if (isProcessed) Icons.Default.Delete else Icons.Default.Close,
-                            contentDescription = if (isProcessed) "Xóa ảnh" else "Bỏ khỏi danh sách",
+                            imageVector = if (isProcessed) Icons.Default.Delete else Icons.Default.Remove,
+                            contentDescription = if (isProcessed) {
+                                if (isVi) "Xóa tệp ảnh" else "Delete image file"
+                            } else {
+                                if (isVi) "Bỏ ảnh khỏi danh sách" else "Remove image from list"
+                            },
                             modifier = Modifier.size(20.dp)
                         )
                     }
