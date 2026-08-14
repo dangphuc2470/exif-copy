@@ -32,9 +32,10 @@ object GeminiWatermarkRemover {
 
     enum class WatermarkMode(val displayNameVi: String, val displayNameEn: String) {
         REVERSE_ALPHA("1. Reverse Alpha (Toán học)", "1. Reverse Alpha (Mathematical)"),
-        OPENCV_INPAINT("2. OpenCV Telea (Inpainting)", "2. OpenCV Telea (Inpainting)"),
-        AI_MODEL("3. AI Denoise Model (FDnCNN AI)", "3. AI Denoise Model (FDnCNN AI)"),
-        ALL_THREE("4. Xuất cả 3 phương án (3 file)", "4. Export all 3 modes (3 files)");
+        IDW_INPAINT("2. IDW Inpaint (Nội suy lấp đầy)", "2. IDW Inpaint (Seamless Sampling)"),
+        OPENCV_INPAINT("3. OpenCV Telea (Inpainting)", "3. OpenCV Telea (Inpainting)"),
+        AI_MODEL("4. AI Denoise Model (FDnCNN AI)", "4. AI Denoise Model (FDnCNN AI)"),
+        ALL_MODES("5. Xuất tất cả các phương án", "5. Export all modes");
 
         val displayName: String get() = displayNameVi
         fun getDisplayName(isVi: Boolean): String = if (isVi) displayNameVi else displayNameEn
@@ -62,8 +63,16 @@ object GeminiWatermarkRemover {
 
     private val ALPHA_GAIN_CANDIDATES = floatArrayOf(1.0f, 0.95f, 0.9f, 0.85f, 0.8f, 0.75f, 0.7f, 0.65f, 0.6f, 0.55f, 0.5f, 0.45f, 0.4f, 0.35f, 0.3f, 0.25f, 0.2f, 0.15f)
 
+    private var cachedAlpha24: FloatArray? = null
     private var cachedAlpha48: FloatArray? = null
     private var cachedAlpha96: FloatArray? = null
+
+    private fun getAlphaMap24(): FloatArray {
+        cachedAlpha24?.let { return it }
+        val decoded = decodeBase64AlphaMap(EmbeddedAlphaData.ALPHA_24_BASE64, 24 * 24)
+        cachedAlpha24 = decoded
+        return decoded
+    }
 
     private fun getAlphaMap48(): FloatArray {
         cachedAlpha48?.let { return it }
@@ -113,35 +122,6 @@ object GeminiWatermarkRemover {
             }
         }
         return result
-    }
-
-    private fun getAlphaMap24(): FloatArray {
-        return floatArrayOf(
-            0.003922f, 0.000000f, 0.003922f, 0.000000f, 0.003922f, 0.000000f, 0.003922f, 0.000000f, 0.003922f, 0.000000f, 0.000000f, 0.149020f, 0.152941f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.000000f, 0.000000f, 0.000000f,
-            0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.000000f, 0.003922f, 0.000000f, 0.003922f, 0.000000f, 0.000000f, 0.262745f, 0.262745f, 0.000000f, 0.000000f, 0.003922f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.000000f, 0.003922f, 0.000000f,
-            0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.000000f, 0.003922f, 0.000000f, 0.074510f, 0.301961f, 0.301961f, 0.078431f, 0.000000f, 0.003922f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.000000f,
-            0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.000000f, 0.007843f, 0.003922f, 0.188235f, 0.301961f, 0.301961f, 0.227451f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.000000f,
-            0.000000f, 0.003922f, 0.003922f, 0.000000f, 0.003922f, 0.000000f, 0.003922f, 0.000000f, 0.003922f, 0.058824f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.078431f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.000000f,
-            0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.003922f, 0.019608f, 0.262745f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.262745f, 0.019608f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.003922f,
-            0.003922f, 0.003922f, 0.007843f, 0.003922f, 0.003922f, 0.003922f, 0.000000f, 0.003922f, 0.207843f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.188235f, 0.003922f, 0.003922f, 0.003922f, 0.003922f, 0.003922f, 0.003922f, 0.000000f, 0.003922f,
-            0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.000000f, 0.152941f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.152941f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.000000f, 0.003922f,
-            0.003922f, 0.003922f, 0.000000f, 0.003922f, 0.000000f, 0.019608f, 0.188235f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.207843f, 0.019608f, 0.003922f, 0.000000f, 0.003922f, 0.003922f, 0.003922f,
-            0.003922f, 0.000000f, 0.000000f, 0.003922f, 0.078431f, 0.262745f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.262745f, 0.058824f, 0.000000f, 0.003922f, 0.003922f, 0.003922f,
-            0.003922f, 0.000000f, 0.078431f, 0.227451f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.188235f, 0.078431f, 0.000000f, 0.003922f,
-            0.152941f, 0.262745f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.262745f, 0.152941f,
-            0.149020f, 0.266667f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.262745f, 0.149020f,
-            0.000000f, 0.003922f, 0.074510f, 0.188235f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.227451f, 0.074510f, 0.000000f, 0.000000f,
-            0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.058824f, 0.266667f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.305882f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.266667f, 0.074510f, 0.000000f, 0.000000f, 0.000000f, 0.000000f,
-            0.000000f, 0.000000f, 0.003922f, 0.003922f, 0.000000f, 0.019608f, 0.207843f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.188235f, 0.019608f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.000000f,
-            0.003922f, 0.000000f, 0.003922f, 0.003922f, 0.003922f, 0.000000f, 0.003922f, 0.149020f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.152941f, 0.000000f, 0.003922f, 0.000000f, 0.003922f, 0.000000f, 0.003922f, 0.000000f,
-            0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.000000f, 0.003922f, 0.003922f, 0.188235f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.207843f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.000000f, 0.003922f, 0.000000f,
-            0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.000000f, 0.019608f, 0.266667f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.266667f, 0.019608f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.000000f,
-            0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.000000f, 0.003922f, 0.074510f, 0.301961f, 0.301961f, 0.301961f, 0.301961f, 0.054902f, 0.003922f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.000000f,
-            0.000000f, 0.003922f, 0.003922f, 0.003922f, 0.003922f, 0.003922f, 0.003922f, 0.000000f, 0.003922f, 0.003922f, 0.227451f, 0.301961f, 0.301961f, 0.188235f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.003922f, 0.003922f, 0.000000f, 0.003922f, 0.000000f,
-            0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.000000f, 0.000000f, 0.003922f, 0.000000f, 0.000000f, 0.074510f, 0.301961f, 0.301961f, 0.078431f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.000000f, 0.003922f,
-            0.003922f, 0.003922f, 0.003922f, 0.003922f, 0.003922f, 0.003922f, 0.000000f, 0.003922f, 0.003922f, 0.000000f, 0.000000f, 0.262745f, 0.266667f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.003922f, 0.007843f, 0.003922f, 0.007843f, 0.003922f, 0.000000f, 0.003922f,
-            0.000000f, 0.000000f, 0.003922f, 0.000000f, 0.000000f, 0.007843f, 0.003922f, 0.003922f, 0.000000f, 0.003922f, 0.007843f, 0.149020f, 0.152941f, 0.000000f, 0.003922f, 0.000000f, 0.000000f, 0.000000f, 0.003922f, 0.000000f, 0.000000f, 0.003922f, 0.000000f, 0.007843f
-        )
     }
 
     private fun getAlphaMapForSize(size: Int): FloatArray {
@@ -417,9 +397,52 @@ object GeminiWatermarkRemover {
     }
 
     /**
-     * Mode 1: Pure mathematical Reverse Alpha Blending.
+     * Mode 1: Pure mathematical Reverse Alpha Blending using exact alpha gain calibration.
+     * C_orig = (C_watermarked - alpha * 255) / (1 - alpha)
      */
-    private fun removeWatermarkFromPixels(
+    private fun reverseAlphaBlendRegion(
+        pixels: IntArray,
+        imageWidth: Int,
+        alphaMap: FloatArray,
+        x: Int,
+        y: Int,
+        width: Int,
+        height: Int,
+        alphaGain: Float = 1.0f
+    ) {
+        val imageHeight = pixels.size / imageWidth
+        for (row in 0 until height) {
+            for (col in 0 until width) {
+                val alphaIdx = row * width + col
+                val rawAlpha = alphaMap[alphaIdx]
+                val alpha = (abs(rawAlpha) * alphaGain).coerceIn(0f, 0.98f)
+                if (alpha < 0.01f) continue
+
+                val px = x + col
+                val py = y + row
+                if (px < 0 || py < 0 || px >= imageWidth || py >= imageHeight) continue
+
+                val pIdx = py * imageWidth + px
+                val curP = pixels[pIdx]
+                val curA = (curP shr 24) and 0xFF
+                val curR = (curP shr 16) and 0xFF
+                val curG = (curP shr 8) and 0xFF
+                val curB = curP and 0xFF
+
+                val oneMinusAlpha = max(1.0f - alpha, 0.02f)
+                val outR = ((curR - alpha * LOGO_VALUE) / oneMinusAlpha).roundToInt().coerceIn(0, 255)
+                val outG = ((curG - alpha * LOGO_VALUE) / oneMinusAlpha).roundToInt().coerceIn(0, 255)
+                val outB = ((curB - alpha * LOGO_VALUE) / oneMinusAlpha).roundToInt().coerceIn(0, 255)
+
+                pixels[pIdx] = (curA shl 24) or (outR shl 16) or (outG shl 8) or outB
+            }
+        }
+    }
+
+    /**
+     * Mode 2: IDW Inpainting across watermark region.
+     */
+    private fun idwInpaintRegion(
         pixels: IntArray,
         imageWidth: Int,
         alphaMap: FloatArray,
@@ -432,14 +455,8 @@ object GeminiWatermarkRemover {
         val copy = pixels.copyOf()
         val imageHeight = pixels.size / imageWidth
         val radius = max(width / 2, 12)
+        val THRESHOLD = 0.02f
 
-        // Full IDW inpaint for all watermark pixels.
-        // Pure reverse alpha was abandoned because the low-resolution 24x24 alpha map,
-        // when interpolated to target size, has inaccurate alpha values at the star tips,
-        // causing reverse alpha to compute wrong colors that appear as a visible outline.
-        // IDW inpaint samples clean pixels outside the watermark region and produces
-        // seamless results with no outline artifacts.
-        val THRESHOLD = 0.04f
         for (row in 0 until height) {
             for (col in 0 until width) {
                 val alphaIdx = row * width + col
@@ -673,7 +690,7 @@ object GeminiWatermarkRemover {
 
         for (gain in ALPHA_GAIN_CANDIDATES) {
             val copy = regionPixels.copyOf()
-            removeWatermarkFromPixels(copy, width, alphaMap, 0, 0, width, height, gain)
+            reverseAlphaBlendRegion(copy, width, alphaMap, 0, 0, width, height, gain)
             val regionGray = FloatArray(width * height)
             val alphaValues = FloatArray(width * height)
             var count = 0
@@ -793,13 +810,16 @@ object GeminiWatermarkRemover {
 
         when (mode) {
             WatermarkMode.REVERSE_ALPHA -> {
-                removeWatermarkFromPixels(pixels, width, alphaMap, targetMatch.x, targetMatch.y, targetMatch.width, targetMatch.height, alphaScale)
+                reverseAlphaBlendRegion(pixels, width, alphaMap, targetMatch.x, targetMatch.y, targetMatch.width, targetMatch.height, alphaScale)
+            }
+            WatermarkMode.IDW_INPAINT -> {
+                idwInpaintRegion(pixels, width, alphaMap, targetMatch.x, targetMatch.y, targetMatch.width, targetMatch.height, alphaScale)
             }
             WatermarkMode.OPENCV_INPAINT -> {
                 teleaInpaintRegion(pixels, width, height, targetMatch.x, targetMatch.y, targetMatch.width, targetMatch.height, alphaMap)
             }
-            WatermarkMode.AI_MODEL, WatermarkMode.ALL_THREE -> {
-                removeWatermarkFromPixels(pixels, width, alphaMap, targetMatch.x, targetMatch.y, targetMatch.width, targetMatch.height, alphaScale)
+            WatermarkMode.AI_MODEL, WatermarkMode.ALL_MODES -> {
+                aiDenoiseModelRegion(pixels, width, height, targetMatch.x, targetMatch.y, targetMatch.width, targetMatch.height, alphaMap)
             }
         }
 

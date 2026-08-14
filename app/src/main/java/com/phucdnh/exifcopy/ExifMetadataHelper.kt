@@ -552,9 +552,10 @@ object ExifMetadataHelper {
             }
             log(context, "Tạo temp file thành công: ${tempFile.absolutePath}")
 
-            val modesToRun = if (removeWatermark && watermarkMode == GeminiWatermarkRemover.WatermarkMode.ALL_THREE) {
+            val modesToRun = if (removeWatermark && watermarkMode == GeminiWatermarkRemover.WatermarkMode.ALL_MODES) {
                 listOf(
                     GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA to "_reverse_alpha",
+                    GeminiWatermarkRemover.WatermarkMode.IDW_INPAINT to "_idw_inpaint",
                     GeminiWatermarkRemover.WatermarkMode.OPENCV_INPAINT to "_opencv_inpaint",
                     GeminiWatermarkRemover.WatermarkMode.AI_MODEL to "_ai_model"
                 )
@@ -667,9 +668,10 @@ object ExifMetadataHelper {
                 }
             }
 
-            val modesToRun = if (removeWatermark && watermarkMode == GeminiWatermarkRemover.WatermarkMode.ALL_THREE) {
+            val modesToRun = if (removeWatermark && watermarkMode == GeminiWatermarkRemover.WatermarkMode.ALL_MODES) {
                 listOf(
                     GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA to "_reverse_alpha",
+                    GeminiWatermarkRemover.WatermarkMode.IDW_INPAINT to "_idw_inpaint",
                     GeminiWatermarkRemover.WatermarkMode.OPENCV_INPAINT to "_opencv_inpaint",
                     GeminiWatermarkRemover.WatermarkMode.AI_MODEL to "_ai_model"
                 )
