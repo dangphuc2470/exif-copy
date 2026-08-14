@@ -291,6 +291,7 @@ fun MainScreen(
 
     // Navigation Tab state
     var activeTab by remember { mutableStateOf(0) } // Default to Tab 0: Sao chép EXIF
+    val resultImages = remember { mutableStateListOf<ImageItem>() }
 
     // Handle incoming shared URIs from external apps based on selected share target
     LaunchedEffect(shareData) {
@@ -758,6 +759,17 @@ fun MainScreen(
                             }
                         }
                     }
+
+                    // CONTAINER C: RESULT IMAGES
+                    if (resultImages.isNotEmpty()) {
+                        ResultImagesSection(
+                            resultImages = resultImages,
+                            onClearResults = { resultImages.clear() },
+                            onRemoveResult = { resultImages.remove(it) },
+                            onPreview = { onPreviewImageChange(it) },
+                            isVi = isVi
+                        )
+                    }
                                 }
                                 // Bottom fading gradient when content can scroll further
                                 if (tab0ScrollState.canScrollForward) {
@@ -878,6 +890,7 @@ fun MainScreen(
                                             var lastOutputUri: Uri? = null
                                             val targetCopy = targetImages.toList()
                                             val sourceCopy = sourceImages.toList()
+                                            val createdUris = mutableListOf<Uri>()
 
                                             // Save source images to recent only upon copying EXIF
                                             addUrisToRecent(sourceCopy.map { it.uri })
@@ -893,24 +906,29 @@ fun MainScreen(
 
                                                     val activeSettings = exifSettings
 
-                                                    val outputUri = ExifMetadataHelper.copyMetadata(
+                                                    val outputUris = ExifMetadataHelper.copyMetadataList(
                                                         context = context,
                                                         sourceUri = sourceItem.uri,
                                                         targetUri = targetItem.uri,
                                                         settings = activeSettings,
-                                                        itemIndex = i,
                                                         replaceOriginal = false,
                                                         removeWatermark = removeWatermark,
                                                         watermarkMode = watermarkMode
                                                     )
-                                                    if (outputUri != null) {
-                                                        successCount++
-                                                        lastOutputUri = outputUri
+                                                    if (outputUris.isNotEmpty()) {
+                                                        successCount += outputUris.size
+                                                        lastOutputUri = outputUris.last()
+                                                        createdUris.addAll(outputUris)
                                                     }
                                                 }
                                             }
 
                                             isProcessing = false
+                                            createdUris.forEach { uri ->
+                                                if (!resultImages.any { it.uri == uri }) {
+                                                    resultImages.add(0, ImageItem(uri))
+                                                }
+                                            }
                                             val resultMsg = Strings.savedResultToast(isVi, successCount, targetCopy.size)
                                             Toast.makeText(context, resultMsg, Toast.LENGTH_LONG).show()
                                             if (lastOutputUri != null) {
@@ -1037,6 +1055,17 @@ fun MainScreen(
                                             }
                                         }
                                     }
+
+                                    // CONTAINER C: RESULT IMAGES
+                                    if (resultImages.isNotEmpty()) {
+                                        ResultImagesSection(
+                                            resultImages = resultImages,
+                                            onClearResults = { resultImages.clear() },
+                                            onRemoveResult = { resultImages.remove(it) },
+                                            onPreview = { onPreviewImageChange(it) },
+                                            isVi = isVi
+                                        )
+                                    }
                                 }
 
                                 // Bottom fading gradient when content can scroll further
@@ -1151,25 +1180,32 @@ fun MainScreen(
                                             var successCount = 0
                                             var lastOutputUri: Uri? = null
                                             val targetCopy = targetImages.toList()
+                                            val createdUris = mutableListOf<Uri>()
 
                                             withContext(Dispatchers.IO) {
                                                 for (i in targetCopy.indices) {
                                                     val targetItem = targetCopy[i]
-                                                    val outputUri = ExifMetadataHelper.cleanGoogleAiMetadata(
+                                                    val outputUris = ExifMetadataHelper.cleanGoogleAiMetadataList(
                                                         context = context,
                                                         targetUri = targetItem.uri,
                                                         replaceOriginal = false,
                                                         removeWatermark = removeWatermark,
                                                         watermarkMode = watermarkMode
                                                     )
-                                                    if (outputUri != null) {
-                                                        successCount++
-                                                        lastOutputUri = outputUri
+                                                    if (outputUris.isNotEmpty()) {
+                                                        successCount += outputUris.size
+                                                        lastOutputUri = outputUris.last()
+                                                        createdUris.addAll(outputUris)
                                                     }
                                                 }
                                             }
 
                                             isProcessing = false
+                                            createdUris.forEach { uri ->
+                                                if (!resultImages.any { it.uri == uri }) {
+                                                    resultImages.add(0, ImageItem(uri))
+                                                }
+                                            }
                                             val resultMsg = Strings.savedResultToast(isVi, successCount, targetCopy.size)
                                             Toast.makeText(context, resultMsg, Toast.LENGTH_LONG).show()
                                             if (lastOutputUri != null) {
@@ -2195,6 +2231,229 @@ fun SettingsTabScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun ResultImagesSection(
+    resultImages: List<ImageItem>,
+    onClearResults: () -> Unit,
+    onRemoveResult: (ImageItem) -> Unit,
+    onPreview: (Uri) -> Unit,
+    isVi: Boolean,
+    modifier: Modifier = Modifier
+) {
+    if (resultImages.isEmpty()) return
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .border(
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                shape = CardDefaults.shape
+            ),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.12f)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = Strings.resultImagesTitle(isVi, resultImages.size),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = onClearResults,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier.heightIn(min = 32.dp)
+                ) {
+                    Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(Strings.clearResults(isVi), fontSize = 12.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(120.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(vertical = 4.dp)
+            ) {
+                itemsIndexed(resultImages, key = { _, item -> item.id }) { index, item ->
+                    ResultImageItemCard(
+                        uri = item.uri,
+                        index = index,
+                        onRemove = { onRemoveResult(item) },
+                        onPreview = onPreview
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ResultImageItemCard(
+    uri: Uri,
+    index: Int,
+    onRemove: () -> Unit,
+    onPreview: (Uri) -> Unit = {}
+) {
+    val context = LocalContext.current
+    Card(
+        modifier = Modifier
+            .aspectRatio(1f)
+            .fillMaxHeight()
+            .clickable { onPreview(uri) },
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            AsyncImage(
+                model = uri,
+                contentDescription = "Result Image",
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(8.dp)),
+                contentScale = ContentScale.Crop
+            )
+
+            // Index badge (top start)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(4.dp)
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .border(1.dp, MaterialTheme.colorScheme.primary, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = (index + 1).toString(),
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            // Share / Action button (bottom start) - generous touch area
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .size(34.dp)
+                    .clickable {
+                        try {
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "image/*"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(shareIntent, null))
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Cannot share: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                contentAlignment = Alignment.BottomStart
+            ) {
+                Box(
+                    modifier = Modifier
+                        .padding(4.dp)
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.6f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Share,
+                        contentDescription = "Share",
+                        tint = Color.White,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
+            }
+
+            // Zoom preview button (bottom right) - generous touch area
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(34.dp)
+                    .clickable { onPreview(uri) },
+                contentAlignment = Alignment.BottomEnd
+            ) {
+                Box(
+                    modifier = Modifier
+                        .padding(4.dp)
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.6f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ZoomIn,
+                        contentDescription = "Zoom Preview",
+                        tint = Color.White,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
+
+            // Remove button 'x' (top right) - generous touch area
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(34.dp)
+                    .clickable { onRemove() },
+                contentAlignment = Alignment.TopEnd
+            ) {
+                Box(
+                    modifier = Modifier
+                        .padding(4.dp)
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.6f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Remove",
+                        tint = Color.White,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
             }
         }
     }

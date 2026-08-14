@@ -236,17 +236,39 @@ object ExifMetadataHelper {
     )
 
 
-
     fun copyMetadata(
         context: Context,
         sourceUri: Uri,
         targetUri: Uri,
-        settings: ExifSettings?,
-        itemIndex: Int, // used to apply incremental random time offset
-        replaceOriginal: Boolean,
+        settings: ExifSettings? = null,
+        itemIndex: Int = 0,
+        replaceOriginal: Boolean = false,
         removeWatermark: Boolean = false,
         watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA
     ): Uri? {
+        return copyMetadataList(
+            context = context,
+            sourceUri = sourceUri,
+            targetUri = targetUri,
+            settings = settings,
+            itemIndex = itemIndex,
+            replaceOriginal = replaceOriginal,
+            removeWatermark = removeWatermark,
+            watermarkMode = watermarkMode
+        ).lastOrNull()
+    }
+
+    fun copyMetadataList(
+        context: Context,
+        sourceUri: Uri,
+        targetUri: Uri,
+        settings: ExifSettings? = null,
+        itemIndex: Int = 0,
+        replaceOriginal: Boolean = false,
+        removeWatermark: Boolean = false,
+        watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA
+    ): List<Uri> {
+        val savedUris = mutableListOf<Uri>()
         try {
             log(context, "--- BẮT ĐẦU SAO CHÉP EXIF ---")
             log(context, "Source URI: $sourceUri")
@@ -327,9 +349,6 @@ object ExifMetadataHelper {
             }
 
             // 1. Read EXIF attributes from sourceUri
-
-            // 1. Read EXIF attributes from sourceUri
-            // Create a temporary file for the source image first to ensure ExifInterface can seek/parse 100% correctly
             val sourceTempFile = File.createTempFile("exif_source_temp", ".jpg", context.cacheDir)
             val inputStream = try {
                 context.contentResolver.openInputStream(sourceUri)
@@ -340,7 +359,7 @@ object ExifMetadataHelper {
             }
             if (inputStream == null) {
                 log(context, "LỖI: Không thể mở stream từ URI: $sourceUri")
-                return null
+                return emptyList()
             }
             inputStream.use { input ->
                 sourceTempFile.outputStream().use { output ->
@@ -358,19 +377,16 @@ object ExifMetadataHelper {
                     log(context, "  [Tag gốc] $tag = $rawVal")
                 }
                 if (tag in tagsToFilter) {
-                    rawVal?.let { value ->
+                    val value = rawVal
+                    if (value != null) {
                         sourceAttributes[tag] = value
-                        log(context, "  [Sẽ sao chép] $tag = $value")
                     }
                 }
             }
-            // Clean up the temp source file
             sourceTempFile.delete()
-            log(context, "Tổng số thuộc tính sẽ sao chép: ${sourceAttributes.size}")
 
             // 2. Perform adjustments (randomization/fixed values) on the attributes
             if (settings != null) {
-                // Populate default Make and Model if missing in the source to ensure Google Photos shows the panel
                 if (copyCamera) {
                     if (sourceAttributes[ExifInterface.TAG_MAKE].isNullOrBlank()) {
                         sourceAttributes[ExifInterface.TAG_MAKE] = "Google"
@@ -563,8 +579,6 @@ object ExifMetadataHelper {
                 listOf(watermarkMode to "")
             }
 
-            var lastSavedUri: Uri? = null
-
             for ((subMode, suffix) in modesToRun) {
                 val runTempFile = File.createTempFile("exif_temp_run", tempExt, context.cacheDir)
                 tempFile.copyTo(runTempFile, overwrite = true)
@@ -623,20 +637,20 @@ object ExifMetadataHelper {
                 val fileName = getUniqueFileName(context, nameWithSuffix, tempExt)
                 log(context, "Tên file đích cuối cùng: $fileName")
                 val savedUri = saveToPublicPictures(context, runTempFile, fileName, outputMimeType)
-                log(context, "Đã lưu bản sao vào Pictures/ExifCopy: $fileName. Output URI: $savedUri")
+                if (savedUri != null) {
+                    savedUris.add(savedUri)
+                    log(context, "Đã lưu bản sao vào Pictures/ExifCopy: $fileName. Output URI: $savedUri")
+                }
                 runTempFile.delete()
-                lastSavedUri = savedUri
             }
 
             tempFile.delete()
             flushLogToPublicStorage(context)
-            return lastSavedUri
-
         } catch (e: Exception) {
-            val fullError = "LỖI TRONG copyMetadata: ${e.message}\n${Log.getStackTraceString(e)}"
+            val fullError = "LỖI TRONG copyMetadataList: ${e.message}\n${Log.getStackTraceString(e)}"
             log(context, fullError)
-            return null
         }
+        return savedUris
     }
 
     fun cleanGoogleAiMetadata(
@@ -780,6 +794,137 @@ object ExifMetadataHelper {
             log(context, fullError)
             return null
         }
+    }
+
+    fun cleanGoogleAiMetadataList(
+        context: Context,
+        targetUri: Uri,
+        replaceOriginal: Boolean,
+        removeWatermark: Boolean = false,
+        watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA
+    ): List<Uri> {
+        val savedUris = mutableListOf<Uri>()
+        try {
+            log(context, "--- BẮT ĐẦU XÓA NHÃN AI (LIST) ---")
+            val targetMimeType = getMimeTypeSafely(context, targetUri)
+            val tempExt = when {
+                targetMimeType.contains("png", ignoreCase = true) -> ".png"
+                targetMimeType.contains("webp", ignoreCase = true) -> ".webp"
+                targetMimeType.contains("heic", ignoreCase = true) || targetMimeType.contains("heif", ignoreCase = true) -> ".heic"
+                else -> ".jpg"
+            }
+            
+            val tempFile = File.createTempFile("exif_clean_temp", tempExt, context.cacheDir)
+            openStreamSafely(context, targetUri)?.use { input ->
+                FileOutputStream(tempFile).use { output ->
+                    input.copyTo(output)
+                }
+            }
+
+            val modesToRun = if (removeWatermark && watermarkMode == GeminiWatermarkRemover.WatermarkMode.ALL_MODES) {
+                listOf(
+                    GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA to "_reverse_alpha",
+                    GeminiWatermarkRemover.WatermarkMode.IDW_INPAINT to "_idw_inpaint",
+                    GeminiWatermarkRemover.WatermarkMode.OPENCV_INPAINT to "_opencv_inpaint",
+                    GeminiWatermarkRemover.WatermarkMode.AI_MODEL to "_ai_model"
+                )
+            } else {
+                listOf(watermarkMode to "")
+            }
+
+            val rawFileName = getFileName(context, targetUri) ?: "clean_${System.currentTimeMillis()}"
+            val baseName = "clean_" + getBaseName(rawFileName)
+
+            for ((subMode, suffix) in modesToRun) {
+                val runTempFile = File.createTempFile("exif_clean_run", tempExt, context.cacheDir)
+                tempFile.copyTo(runTempFile, overwrite = true)
+
+                if (removeWatermark) {
+                    try {
+                        val decodeOptions = BitmapFactory.Options().apply {
+                            inPreferredConfig = Bitmap.Config.ARGB_8888
+                            inMutable = true
+                            inPremultiplied = false
+                        }
+                        val bitmap = BitmapFactory.decodeFile(runTempFile.absolutePath, decodeOptions)
+                        if (bitmap != null) {
+                            val result = GeminiWatermarkRemover.processImage(bitmap, subMode)
+                            log(context, "Đã xử lý xóa watermark Gemini (${subMode.displayName}, detected=${result.detected}, match=${result.match}).")
+                            FileOutputStream(runTempFile).use { output ->
+                                val compressFormat = when {
+                                    tempExt.contains("png", ignoreCase = true) -> android.graphics.Bitmap.CompressFormat.PNG
+                                    tempExt.contains("webp", ignoreCase = true) -> {
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                            android.graphics.Bitmap.CompressFormat.WEBP_LOSSLESS
+                                        } else {
+                                            @Suppress("DEPRECATION")
+                                            android.graphics.Bitmap.CompressFormat.WEBP
+                                        }
+                                    }
+                                    else -> android.graphics.Bitmap.CompressFormat.JPEG
+                                }
+                                val quality = if (compressFormat == android.graphics.Bitmap.CompressFormat.PNG) 100 else 95
+                                result.bitmap.compress(compressFormat, quality, output)
+                                output.flush()
+                            }
+                            if (result.bitmap !== bitmap) {
+                                result.bitmap.recycle()
+                            }
+                            bitmap.recycle()
+                        }
+                    } catch (e: Exception) {
+                        log(context, "Lỗi khi xóa watermark Gemini (${subMode.displayName}): ${e.message}")
+                    }
+                }
+
+                val exif = ExifInterface(runTempFile.absolutePath)
+                val xmp = exif.getAttribute(ExifInterface.TAG_XMP)
+                if (xmp != null) {
+                    var cleanedXmp = xmp
+                    val creditRegex = """<photoshop:Credit>[^<]*</photoshop:Credit>""".toRegex()
+                    cleanedXmp = cleanedXmp.replace(creditRegex, "")
+
+                    val dstRegex = """<Iptc4xmpExt:DigitalSourceType>[^<]*</Iptc4xmpExt:DigitalSourceType>""".toRegex()
+                    cleanedXmp = cleanedXmp.replace(dstRegex, "")
+
+                    val hasExtendedXmpRegex = """<xmpNote:HasExtendedXMP>[^<]*</xmpNote:HasExtendedXMP>""".toRegex()
+                    cleanedXmp = cleanedXmp.replace(hasExtendedXmpRegex, "")
+
+                    exif.setAttribute(ExifInterface.TAG_XMP, cleanedXmp)
+                }
+
+                val software = exif.getAttribute(ExifInterface.TAG_SOFTWARE)
+                if (software != null && (software.contains("Google", ignoreCase = true) || software.contains("AI", ignoreCase = true))) {
+                    exif.setAttribute(ExifInterface.TAG_SOFTWARE, "Android Camera")
+                }
+
+                val comment = exif.getAttribute(ExifInterface.TAG_USER_COMMENT)
+                if (comment != null && (comment.contains("Google", ignoreCase = true) || comment.contains("AI", ignoreCase = true))) {
+                    exif.setAttribute(ExifInterface.TAG_USER_COMMENT, null)
+                }
+
+                try {
+                    exif.saveAttributes()
+                } catch (e: Exception) {
+                    log(context, "Bỏ qua saveAttributes: ${e.message}")
+                }
+
+                val nameWithSuffix = "$baseName$suffix"
+                val fileName = getUniqueFileName(context, nameWithSuffix, tempExt)
+                val savedUri = saveToPublicPictures(context, runTempFile, fileName, targetMimeType)
+                if (savedUri != null) {
+                    savedUris.add(savedUri)
+                    log(context, "Đã lưu bản sao vào Pictures/ExifCopy: $fileName. Output URI: $savedUri")
+                }
+                runTempFile.delete()
+            }
+
+            tempFile.delete()
+            flushLogToPublicStorage(context)
+        } catch (e: Exception) {
+            log(context, "LỖI TRONG cleanGoogleAiMetadataList: ${e.message}")
+        }
+        return savedUris
     }
 
     private fun saveToPublicPictures(context: Context, sourceFile: File, fileName: String, mimeType: String): Uri? {

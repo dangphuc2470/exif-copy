@@ -36,6 +36,8 @@ object Strings {
     fun emptySourceMsg(isVi: Boolean) = if (isVi) "Chưa chọn ảnh nguồn.\nẢnh dùng để lấy thông tin EXIF." else "No source images selected.\nUsed to extract EXIF metadata."
     fun emptyTargetMsg(isVi: Boolean) = if (isVi) "Chưa chọn ảnh đích.\nẢnh sẽ được gán EXIF mới." else "No target images selected.\nWill receive new EXIF metadata."
     fun emptyAiTargetMsg(isVi: Boolean) = if (isVi) "Chưa chọn ảnh đích.\nChọn ảnh cần xóa nhãn Google AI & watermark." else "No target images selected.\nSelect images to remove Google AI labels & watermarks."
+    fun resultImagesTitle(isVi: Boolean, count: Int) = if (isVi) "Ảnh kết quả ($count)" else "Result images ($count)"
+    fun clearResults(isVi: Boolean) = if (isVi) "Xóa kết quả" else "Clear results"
 
     // Controls
     fun swap(isVi: Boolean) = if (isVi) "Hoán đổi" else "Swap"
