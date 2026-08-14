@@ -1999,14 +1999,7 @@ fun ImagePreviewDialog(
                                         }
                                     } else {
                                         lastTapTime = now
-                                        if (scaleAnim.value > 1.05f) {
-                                            coroutineScope.launch {
-                                                launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                                launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                                launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                            }
-                                        }
-                                        // At 1x: Single tap on the photo stays open, waiting for double tap
+                                        // Single tap on photo does nothing (only double-tap toggles zoom)
                                     }
                                 } else if (scaleAnim.value <= 1.05f) {
                                     coroutineScope.launch {
