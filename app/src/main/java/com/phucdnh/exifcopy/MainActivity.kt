@@ -1889,7 +1889,7 @@ fun ImagePreviewDialog(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             window?.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
             window?.attributes = window?.attributes?.apply {
-                blurBehindRadius = 45
+                blurBehindRadius = 24
             }
         }
         onDispose {}
@@ -1910,42 +1910,21 @@ fun ImagePreviewDialog(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.65f * fadeAlpha.value))
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = {
-                            if (scaleAnim.value <= 1.05f) {
-                                handleDismiss()
-                            } else {
-                                coroutineScope.launch {
-                                    launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                    launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                    launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                }
-                            }
-                        },
-                        onDoubleTap = {
-                            coroutineScope.launch {
-                                if (scaleAnim.value > 1.05f) {
-                                    launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                    launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                    launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                } else {
-                                    launch { scaleAnim.animateTo(2.5f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                }
-                            }
-                        }
-                    )
-                }
+                .background(Color.Black.copy(alpha = 0.45f * fadeAlpha.value))
                 .pointerInput(Unit) {
                     awaitEachGesture {
-                        awaitFirstDown(requireUnconsumed = false)
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val downTime = System.currentTimeMillis()
+                        var hasTransform = false
+                        val startScale = scaleAnim.value
+
                         do {
                             val event = awaitPointerEvent()
                             val zoom = event.calculateZoom()
                             val pan = event.calculatePan()
 
-                            if (zoom != 1f || pan != Offset.Zero) {
+                            if (zoom != 1f || pan.getDistance() > 2f) {
+                                hasTransform = true
                                 val currentScale = scaleAnim.value
                                 val newScale = (currentScale * zoom).coerceIn(0.7f, 8f)
                                 val dampening = if (newScale < 1f) 0.35f else 1f
@@ -1961,8 +1940,19 @@ fun ImagePreviewDialog(
                             }
                         } while (event.changes.any { it.pressed })
 
-                        // When user lifts all fingers: spring smoothly back to 1x center if scale <= 1.05f or below 1x
-                        if (scaleAnim.value <= 1.05f) {
+                        val elapsed = System.currentTimeMillis() - downTime
+                        if (!hasTransform && elapsed < 350) {
+                            // Instant zero-delay tap on finger up!
+                            if (startScale <= 1.05f) {
+                                handleDismiss()
+                            } else {
+                                coroutineScope.launch {
+                                    launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                    launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                    launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                }
+                            }
+                        } else if (scaleAnim.value <= 1.05f) {
                             coroutineScope.launch {
                                 launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 340f)) }
                                 launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 340f)) }
