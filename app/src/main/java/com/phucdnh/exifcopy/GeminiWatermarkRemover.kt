@@ -162,53 +162,98 @@ object GeminiWatermarkRemover {
         return sobelMagnitude(absAlpha, size, size)
     }
 
-    private fun scoreZeroMeanCrossCorrelation(
-        gray: FloatArray,
-        imageWidth: Int,
-        imageHeight: Int,
-        x: Int,
-        y: Int,
-        size: Int,
-        alphaMap: FloatArray,
-        tMean: Float,
-        tNorm: Float
-    ): Float {
-        if (x < 0 || y < 0 || x + size > imageWidth || y + size > imageHeight) return -1f
-        var count = 0
-        var subSum = 0f
+    private class TemplateData(
+        val size: Int,
+        val alphaMap: FloatArray,
+        val nonZeroOffsets: IntArray,
+        val nonZeroAlphas: FloatArray,
+        val tMean: Float,
+        val tNorm: Float
+    )
 
-        for (row in 0 until size) {
-            val offset = (y + row) * imageWidth + x
-            val aOffset = row * size
-            for (col in 0 until size) {
-                if (alphaMap[aOffset + col] > 0.01f) {
-                    subSum += gray[offset + col]
-                    count++
-                }
+    private val templateCache = mutableMapOf<Int, TemplateData>()
+
+    private fun getTemplateData(size: Int): TemplateData {
+        templateCache[size]?.let { return it }
+        val alphaMap = getAlphaMapForSize(size)
+        val offsets = mutableListOf<Int>()
+        val alphas = mutableListOf<Float>()
+        var sum = 0f
+
+        for (i in alphaMap.indices) {
+            val v = alphaMap[i]
+            if (v > 0.02f) {
+                offsets.add(i)
+                alphas.add(v)
+                sum += v
             }
         }
+
+        val count = offsets.size
+        val mean = if (count > 0) sum / count else 0f
+        var normSq = 0f
+        for (v in alphas) {
+            val dt = v - mean
+            normSq += dt * dt
+        }
+        val norm = kotlin.math.sqrt(normSq).coerceAtLeast(1e-5f)
+
+        val data = TemplateData(
+            size = size,
+            alphaMap = alphaMap,
+            nonZeroOffsets = offsets.toIntArray(),
+            nonZeroAlphas = alphas.toFloatArray(),
+            tMean = mean,
+            tNorm = norm
+        )
+        templateCache[size] = data
+        return data
+    }
+
+    private fun scoreZeroMeanCrossCorrelationLocal(
+        searchGray: FloatArray,
+        searchW: Int,
+        searchH: Int,
+        x: Int,
+        y: Int,
+        template: TemplateData
+    ): Float {
+        val size = template.size
+        if (x < 0 || y < 0 || x + size > searchW || y + size > searchH) return -1f
+
+        val offsets = template.nonZeroOffsets
+        val alphas = template.nonZeroAlphas
+        val count = offsets.size
         if (count < 10) return -1f
+
+        var subSum = 0f
+        for (i in 0 until count) {
+            val off = offsets[i]
+            val row = off / size
+            val col = off % size
+            val gIdx = (y + row) * searchW + (x + col)
+            subSum += searchGray[gIdx]
+        }
         val subMean = subSum / count
 
         var subNormSq = 0f
         var crossSum = 0f
+        val tMean = template.tMean
 
-        for (row in 0 until size) {
-            val offset = (y + row) * imageWidth + x
-            val aOffset = row * size
-            for (col in 0 until size) {
-                val a = alphaMap[aOffset + col]
-                if (a > 0.01f) {
-                    val diffS = gray[offset + col] - subMean
-                    subNormSq += diffS * diffS
-                    crossSum += (a - tMean) * diffS
-                }
-            }
+        for (i in 0 until count) {
+            val off = offsets[i]
+            val row = off / size
+            val col = off % size
+            val gIdx = (y + row) * searchW + (x + col)
+            val diffS = searchGray[gIdx] - subMean
+            subNormSq += diffS * diffS
+            crossSum += (alphas[i] - tMean) * diffS
         }
+
         val subNorm = kotlin.math.sqrt(subNormSq)
         if (subNorm < 1e-5f) return -1f
 
-        return crossSum / (tNorm * subNorm)
+        return crossSum / (template.tNorm * subNorm)
     }
 
     private fun normalizedCrossCorrelation(a: FloatArray, b: FloatArray, length: Int): Float {
@@ -235,121 +280,104 @@ object GeminiWatermarkRemover {
     }
 
     fun findWatermarkMatch(pixels: IntArray, imageWidth: Int, imageHeight: Int): DetectionMatch? {
-        val fullGray = FloatArray(imageWidth * imageHeight)
-        val searchW = min(imageWidth, 360)
-        val searchH = min(imageHeight, 360)
+        val searchW = min(imageWidth, 320)
+        val searchH = min(imageHeight, 320)
         val startX = imageWidth - searchW
         val startY = imageHeight - searchH
 
-        for (y in startY until imageHeight) {
-            val offset = y * imageWidth
-            for (x in startX until imageWidth) {
-                val idx = offset + x
-                val pixel = pixels[idx]
+        // Localized search gray array (only ~100KB instead of 48MB full image buffer)
+        val searchGray = FloatArray(searchW * searchH)
+        for (y in 0 until searchH) {
+            val py = startY + y
+            val rowOffset = py * imageWidth
+            val sRowOffset = y * searchW
+            for (x in 0 until searchW) {
+                val px = startX + x
+                val pixel = pixels[rowOffset + px]
                 val r = (pixel shr 16) and 0xFF
                 val g = (pixel shr 8) and 0xFF
                 val b = pixel and 0xFF
-                fullGray[idx] = (0.2126f * r + 0.7152f * g + 0.0722f * b) / 255f
+                searchGray[sRowOffset + x] = (0.2126f * r + 0.7152f * g + 0.0722f * b) / 255f
             }
         }
 
-        val logoSizesToTest = intArrayOf(24, 28, 32, 36, 40, 48, 56, 64, 72, 80, 96, 112, 128)
+        val maxDim = max(imageWidth, imageHeight)
+        val logoSizesToTest = when {
+            maxDim >= 1800 -> intArrayOf(96, 64, 48, 112, 128, 80, 72)
+            maxDim >= 900 -> intArrayOf(96, 48, 64, 72, 32, 40)
+            else -> intArrayOf(48, 32, 24, 64, 40, 28)
+        }
+
         var bestScore = -999.0f
-        var bestMatch: DetectionMatch? = null
+        var bestLocalX = 0
+        var bestLocalY = 0
+        var bestSize = 48
+        var bestTemplate: TemplateData? = null
 
         for (size in logoSizesToTest) {
             if (size >= searchW || size >= searchH) continue
-            val alphaMap = getAlphaMapForSize(size)
+            val template = getTemplateData(size)
+            if (template.nonZeroOffsets.size < 10) continue
 
-            var tSum = 0f
-            var tCount = 0
-            for (v in alphaMap) {
-                if (v > 0.01f) {
-                    tSum += v
-                    tCount++
-                }
-            }
-            if (tCount < 10) continue
-            val tMean = tSum / tCount
+            val maxLocalX = searchW - size
+            val maxLocalY = searchH - size
+            val coarseStep = if (size >= 48) 4 else 3
 
-            var tNormSq = 0f
-            for (v in alphaMap) {
-                if (v > 0.01f) {
-                    val dt = v - tMean
-                    tNormSq += dt * dt
-                }
-            }
-            val tNorm = kotlin.math.sqrt(tNormSq)
-            if (tNorm < 1e-5f) continue
-
-            val maxX = imageWidth - size
-            val maxY = imageHeight - size
-            val coarseStep = if (size >= 48) 2 else 1
-
-            for (cy in startY..maxY step coarseStep) {
-                for (cx in startX..maxX step coarseStep) {
-                    val score = scoreZeroMeanCrossCorrelation(
-                        fullGray, imageWidth, imageHeight, cx, cy, size, alphaMap, tMean, tNorm
+            for (cy in 0..maxLocalY step coarseStep) {
+                for (cx in 0..maxLocalX step coarseStep) {
+                    val score = scoreZeroMeanCrossCorrelationLocal(
+                        searchGray, searchW, searchH, cx, cy, template
                     )
                     if (score > bestScore) {
                         bestScore = score
-                        bestMatch = DetectionMatch(cx, cy, size, size, score, "Size_${size}")
+                        bestLocalX = cx
+                        bestLocalY = cy
+                        bestSize = size
+                        bestTemplate = template
                     }
                 }
             }
+
+            // Early exit if we find an exceptionally strong watermark match
+            if (bestScore >= 0.70f) {
+                break
+            }
         }
 
-        // Fine-tune with step 1 in [-4..4] around the best coarse candidate
-        if (bestMatch != null && bestMatch.score > 0.10f) {
-            val bx = bestMatch.x
-            val by = bestMatch.y
-            val bSize = bestMatch.width
-            val alphaMap = getAlphaMapForSize(bSize)
+        // Fine-tune with step 1 in [-5..5] around the best coarse candidate
+        if (bestTemplate != null && bestScore > 0.08f) {
+            val template = bestTemplate
+            var fineBestScore = bestScore
+            var fineBestLocalX = bestLocalX
+            var fineBestLocalY = bestLocalY
+            val maxLocalX = searchW - bestSize
+            val maxLocalY = searchH - bestSize
 
-            var tSum = 0f
-            var tCount = 0
-            for (v in alphaMap) {
-                if (v > 0.01f) {
-                    tSum += v
-                    tCount++
-                }
-            }
-            val tMean = if (tCount > 0) tSum / tCount else 0f
-            var tNormSq = 0f
-            for (v in alphaMap) {
-                if (v > 0.01f) {
-                    val dt = v - tMean
-                    tNormSq += dt * dt
-                }
-            }
-            val tNorm = kotlin.math.sqrt(tNormSq)
-
-            var fineBestScore = bestMatch.score
-            var fineBestX = bx
-            var fineBestY = by
-
-            val maxX = imageWidth - bSize
-            val maxY = imageHeight - bSize
-
-            for (dy in -4..4) {
-                val fy = (by + dy).coerceIn(0, maxY)
-                for (dx in -4..4) {
-                    val fx = (bx + dx).coerceIn(0, maxX)
-                    val score = scoreZeroMeanCrossCorrelation(
-                        fullGray, imageWidth, imageHeight, fx, fy, bSize, alphaMap, tMean, tNorm
+            for (dy in -5..5) {
+                val fy = (bestLocalY + dy).coerceIn(0, maxLocalY)
+                for (dx in -5..5) {
+                    val fx = (bestLocalX + dx).coerceIn(0, maxLocalX)
+                    val score = scoreZeroMeanCrossCorrelationLocal(
+                        searchGray, searchW, searchH, fx, fy, template
                     )
                     if (score > fineBestScore) {
                         fineBestScore = score
-                        fineBestX = fx
-                        fineBestY = fy
+                        fineBestLocalX = fx
+                        fineBestLocalY = fy
                     }
                 }
             }
 
-            return DetectionMatch(fineBestX, fineBestY, bSize, bSize, fineBestScore, "Fine_${bSize}")
+            val finalX = startX + fineBestLocalX
+            val finalY = startY + fineBestLocalY
+            return DetectionMatch(finalX, finalY, bestSize, bestSize, fineBestScore, "Size_${bestSize}")
         }
 
-        return bestMatch
+        if (bestTemplate != null && bestScore > -900f) {
+            return DetectionMatch(startX + bestLocalX, startY + bestLocalY, bestSize, bestSize, bestScore, "Size_${bestSize}")
+        }
+
+        return null
     }
 
     /**
@@ -741,10 +769,10 @@ object GeminiWatermarkRemover {
         val width = bitmap.width
         val height = bitmap.height
 
-        val match = findWatermarkMatch(bitmap)
-
         val pixels = IntArray(width * height)
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+
+        val match = findWatermarkMatch(pixels, width, height)
 
         val targetMatch = if (match != null && match.score >= 0.15f) {
             match
