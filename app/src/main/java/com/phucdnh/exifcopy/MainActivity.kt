@@ -126,14 +126,13 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
-            var previewImageUri by remember { mutableStateOf<Uri?>(null) }
-            var onDeleteCurrentPreview: (() -> Unit)? by remember { mutableStateOf(null) }
+            var previewState by remember { mutableStateOf<PreviewState?>(null) }
 
             MyApplicationTheme {
                 Scaffold(
                     modifier = Modifier
                         .fillMaxSize()
-                        .blur(if (previewImageUri != null) 24.dp else 0.dp),
+                        .blur(if (previewState != null) 24.dp else 0.dp),
                     topBar = {
                         TopAppBar(
                             title = {
@@ -154,22 +153,23 @@ class MainActivity : ComponentActivity() {
                     MainScreen(
                         shareData = shareData,
                         onClearShareData = { shareDataState.value = ShareIntentData() },
-                        previewImageUri = previewImageUri,
-                        onPreviewImageChange = { previewImageUri = it },
-                        onRegisterDeleteCallback = { callback -> onDeleteCurrentPreview = callback },
+                        onOpenPreview = { uri, isProcessed, onAction ->
+                            previewState = PreviewState(uri, isProcessed, onAction)
+                        },
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(innerPadding)
                     )
                 }
 
-                previewImageUri?.let { uri ->
+                previewState?.let { state ->
                     ImagePreviewDialog(
-                        uri = uri,
-                        onDismiss = { previewImageUri = null },
-                        onDelete = {
-                            onDeleteCurrentPreview?.invoke()
-                            previewImageUri = null
+                        uri = state.uri,
+                        isProcessed = state.isProcessed,
+                        onDismiss = { previewState = null },
+                        onAction = {
+                            state.onAction?.invoke()
+                            previewState = null
                         }
                     )
                 }
@@ -226,13 +226,27 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+data class PreviewState(
+    val uri: Uri,
+    val isProcessed: Boolean = false,
+    val onAction: (() -> Unit)? = null
+)
+
+fun deleteProcessedImage(context: Context, uri: Uri) {
+    try {
+        if (uri.scheme == "content") {
+            context.contentResolver.delete(uri, null, null)
+        } else if (uri.scheme == "file" || uri.path != null) {
+            java.io.File(uri.path!!).delete()
+        }
+    } catch (_: Exception) {}
+}
+
 @Composable
 fun MainScreen(
     shareData: ShareIntentData,
     onClearShareData: () -> Unit,
-    previewImageUri: Uri?,
-    onPreviewImageChange: (Uri?) -> Unit,
-    onRegisterDeleteCallback: ((() -> Unit) -> Unit)? = null,
+    onOpenPreview: (Uri, Boolean, (() -> Unit)?) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -241,16 +255,6 @@ fun MainScreen(
     // Main image lists (persisted across multi-target share intents and multitasking)
     val sourceImages = MainActivity.globalSourceImages
     val targetImages = MainActivity.globalTargetImages
-
-    // Register delete callback when previewImageUri changes
-    LaunchedEffect(previewImageUri) {
-        if (previewImageUri != null) {
-            onRegisterDeleteCallback?.invoke {
-                sourceImages.removeAll { it.uri == previewImageUri }
-                targetImages.removeAll { it.uri == previewImageUri }
-            }
-        }
-    }
 
     // Multi-selection states
     val selectedSourceIds = remember { mutableStateListOf<String>() }
@@ -402,7 +406,6 @@ fun MainScreen(
         modifier = modifier
             .background(MaterialTheme.colorScheme.background)
             .onGloballyPositioned { mainScreenWindowBounds = it.boundsInWindow() }
-            .blur(if (previewImageUri != null) 24.dp else 0.dp)
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -589,7 +592,12 @@ fun MainScreen(
                                                         recentSourceImages.remove(recentUri)
                                                         saveRecentUris()
                                                     },
-                                                    onPreview = { onPreviewImageChange(it) }
+                                                    onPreview = {
+                                                        onOpenPreview(it, false) {
+                                                            recentSourceImages.remove(recentUri)
+                                                            saveRecentUris()
+                                                        }
+                                                    }
                                                 )
                                             }
                                         }
@@ -641,7 +649,12 @@ fun MainScreen(
                                                     selectedSourceIds.clear()
                                                 }
                                             },
-                                            onPreview = { onPreviewImageChange(it) }
+                                            onPreview = {
+                                                onOpenPreview(it, false) {
+                                                    sourceImages.remove(item)
+                                                    selectedSourceIds.remove(item.id)
+                                                }
+                                            }
                                         )
                                     }
                                 }
@@ -771,7 +784,12 @@ fun MainScreen(
                                                     selectedTargetIds.clear()
                                                 }
                                             },
-                                            onPreview = { onPreviewImageChange(it) }
+                                            onPreview = {
+                                                onOpenPreview(it, false) {
+                                                    targetImages.remove(item)
+                                                    selectedTargetIds.remove(item.id)
+                                                }
+                                            }
                                         )
                                     }
                                 }
@@ -783,9 +801,20 @@ fun MainScreen(
                     if (resultImages.isNotEmpty()) {
                         ResultImagesSection(
                             resultImages = resultImages,
-                            onClearResults = { resultImages.clear() },
-                            onRemoveResult = { resultImages.remove(it) },
-                            onPreview = { onPreviewImageChange(it) },
+                            onClearResults = {
+                                resultImages.forEach { deleteProcessedImage(context, it.uri) }
+                                resultImages.clear()
+                            },
+                            onRemoveResult = {
+                                deleteProcessedImage(context, it.uri)
+                                resultImages.remove(it)
+                            },
+                            onPreview = { uri ->
+                                onOpenPreview(uri, true) {
+                                    deleteProcessedImage(context, uri)
+                                    resultImages.removeAll { it.uri == uri }
+                                }
+                            },
                             isVi = isVi
                         )
                     }
@@ -1067,7 +1096,12 @@ fun MainScreen(
                                                             sourceBounds = Rect.Zero,
                                                             targetBounds = Rect.Zero,
                                                             onDragEnded = { },
-                                                            onPreview = { onPreviewImageChange(it) }
+                                                            onPreview = {
+                                                                onOpenPreview(it, false) {
+                                                                    targetImages.remove(item)
+                                                                    selectedTargetIds.remove(item.id)
+                                                                }
+                                                            }
                                                         )
                                                     }
                                                 }
@@ -1079,9 +1113,20 @@ fun MainScreen(
                                     if (resultImages.isNotEmpty()) {
                                         ResultImagesSection(
                                             resultImages = resultImages,
-                                            onClearResults = { resultImages.clear() },
-                                            onRemoveResult = { resultImages.remove(it) },
-                                            onPreview = { onPreviewImageChange(it) },
+                                            onClearResults = {
+                                                resultImages.forEach { deleteProcessedImage(context, it.uri) }
+                                                resultImages.clear()
+                                            },
+                                            onRemoveResult = {
+                                                deleteProcessedImage(context, it.uri)
+                                                resultImages.remove(it)
+                                            },
+                                            onPreview = { uri ->
+                                                onOpenPreview(uri, true) {
+                                                    deleteProcessedImage(context, uri)
+                                                    resultImages.removeAll { it.uri == uri }
+                                                }
+                                            },
                                             isVi = isVi
                                         )
                                     }
@@ -1424,7 +1469,10 @@ fun MainScreen(
                                 .height(230.dp)
                                 .clip(RoundedCornerShape(16.dp))
                                 .clickable {
-                                    onPreviewImageChange(singleResultUri)
+                                    onOpenPreview(singleResultUri!!, true) {
+                                        deleteProcessedImage(context, singleResultUri!!)
+                                        resultImages.removeAll { it.uri == singleResultUri }
+                                    }
                                 },
                             shape = RoundedCornerShape(16.dp),
                             colors = CardDefaults.cardColors(containerColor = Color(0xFF181818)),
@@ -1822,8 +1870,9 @@ fun RecentImageItemCard(
 @Composable
 fun ImagePreviewDialog(
     uri: Uri,
+    isProcessed: Boolean = false,
     onDismiss: () -> Unit,
-    onDelete: (() -> Unit)? = null
+    onAction: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val scaleAnim = remember { Animatable(1f) }
@@ -1867,18 +1916,19 @@ fun ImagePreviewDialog(
         }
     }
 
-    val handleDelete = {
+    val handleAction = {
         if (!isClosing) {
             isClosing = true
             coroutineScope.launch {
-                // Distinct snappy delete animation: photo shrinks, sinks down and fades away into trash
+                // Distinct snappy action animation: photo shrinks, sinks down and fades away into trash
                 launch { deleteScale.animateTo(0.65f, tween(durationMillis = 140, easing = FastOutSlowInEasing)) }
                 launch { deleteOffsetY.animateTo(70f, tween(durationMillis = 140, easing = FastOutSlowInEasing)) }
                 launch { deleteAlpha.animateTo(0f, tween(durationMillis = 120, easing = FastOutLinearInEasing)) }
                 launch { fadeAlpha.animateTo(0f, tween(durationMillis = 140, easing = FastOutLinearInEasing)) }
                 kotlinx.coroutines.delay(140)
-                onDelete?.invoke()
-                Toast.makeText(context, "Đã xóa ảnh!", Toast.LENGTH_SHORT).show()
+                onAction?.invoke()
+                val msg = if (isProcessed) "Đã xóa ảnh!" else "Đã bỏ khỏi danh sách!"
+                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -1924,8 +1974,6 @@ fun ImagePreviewDialog(
                         var hasTransform = false
                         var totalDragY = 0f
                         var totalDragX = 0f
-                        var lastY = downPos.y
-                        var lastX = downPos.x
                         val rect = photoRect
                         val isOnPhoto = rect != null && rect.contains(downPos)
 
@@ -1933,7 +1981,6 @@ fun ImagePreviewDialog(
                             val event = awaitPointerEvent()
                             val zoom = event.calculateZoom()
                             val pan = event.calculatePan()
-                            val currentPointer = event.changes.firstOrNull()
 
                             if (zoom != 1f || pan.getDistance() > 2f) {
                                 hasTransform = true
@@ -2099,19 +2146,20 @@ fun ImagePreviewDialog(
                     )
                 }
 
-                // Delete button
-                if (onDelete != null) {
+                // Action button (Delete for processed, Remove for imported)
+                if (onAction != null) {
                     FilledIconButton(
-                        onClick = { handleDelete() },
+                        onClick = { handleAction() },
                         modifier = Modifier.size(42.dp),
                         colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.85f),
-                            contentColor = MaterialTheme.colorScheme.onError
+                            containerColor = if (isProcessed) MaterialTheme.colorScheme.error.copy(alpha = 0.85f)
+                                             else Color.Black.copy(alpha = 0.65f),
+                            contentColor = if (isProcessed) MaterialTheme.colorScheme.onError else Color.White
                         )
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = "Xóa ảnh",
+                            imageVector = if (isProcessed) Icons.Default.Delete else Icons.Default.Close,
+                            contentDescription = if (isProcessed) "Xóa ảnh" else "Bỏ khỏi danh sách",
                             modifier = Modifier.size(20.dp)
                         )
                     }
