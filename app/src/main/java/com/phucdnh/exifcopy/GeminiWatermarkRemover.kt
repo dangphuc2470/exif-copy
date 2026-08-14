@@ -853,7 +853,7 @@ object GeminiWatermarkRemover {
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
                 put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/ExifCopy")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/EXIFCopy")
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
             val uri = context.contentResolver.insert(
@@ -870,7 +870,7 @@ object GeminiWatermarkRemover {
         } else {
             val dir = File(
                 Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-                "ExifCopy"
+                "EXIFCopy"
             )
             if (!dir.exists()) dir.mkdirs()
             val file = File(dir, fileName)

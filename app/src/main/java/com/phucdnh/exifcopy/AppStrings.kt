@@ -58,7 +58,7 @@ object Strings {
     fun copiedToClipboard(isVi: Boolean) = if (isVi) "Đã sao chép vào bộ nhớ tạm!" else "Copied to clipboard!"
     fun logsCleared(isVi: Boolean) = if (isVi) "Đã xóa nhật ký!" else "Logs cleared!"
     fun updatedSettings(isVi: Boolean) = if (isVi) "Đã cập nhật cấu hình random EXIF!" else "Updated random EXIF settings!"
-    fun savedResultToast(isVi: Boolean, count: Int, total: Int) = if (isVi) "Đã lưu $count/$total ảnh vào thư mục Pictures/ExifCopy!" else "Saved $count/$total images to Pictures/ExifCopy!"
+    fun savedResultToast(isVi: Boolean, count: Int, total: Int) = if (isVi) "Đã lưu $count/$total ảnh vào thư mục Pictures/EXIFCopy!" else "Saved $count/$total images to Pictures/EXIFCopy!"
 
     // Logs Tab
     fun logsTitle(isVi: Boolean) = if (isVi) "Nhật ký hoạt động (Log)" else "Activity logs"
@@ -79,7 +79,7 @@ object Strings {
 
     // Dialogs
     fun completionDialogTitle(isVi: Boolean) = if (isVi) "Xử lý hoàn tất!" else "Process completed!"
-    fun completionDialogMsg(isVi: Boolean) = if (isVi) "Đã lưu ảnh mới vào thư mục Pictures/ExifCopy!" else "Saved new images to Pictures/ExifCopy!"
+    fun completionDialogMsg(isVi: Boolean) = if (isVi) "Đã lưu ảnh mới vào thư mục Pictures/EXIFCopy!" else "Saved new images to Pictures/EXIFCopy!"
     fun tapToZoom(isVi: Boolean) = if (isVi) "Chạm để phóng to" else "Tap to zoom"
     fun close(isVi: Boolean) = if (isVi) "Đóng" else "Close"
     fun externalShareTitle(isVi: Boolean) = if (isVi) "Nhập ảnh từ bên ngoài" else "Import external images"

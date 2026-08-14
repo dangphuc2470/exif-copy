@@ -2198,7 +2198,7 @@ fun SettingsTabScreen(
                 
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = if (isVi) "Lưu ý: Nhật ký cũng được lưu tự động tại Pictures/ExifCopy/exif_log.txt để bạn có thể xem lại bất kỳ lúc nào." else "Note: Logs are also automatically saved to Pictures/ExifCopy/exif_log.txt for review.",
+                    text = if (isVi) "Lưu ý: Nhật ký cũng được lưu tự động tại Pictures/EXIFCopy/exif_log.txt để bạn có thể xem lại bất kỳ lúc nào." else "Note: Logs are also automatically saved to Pictures/EXIFCopy/exif_log.txt for review.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                     fontSize = 10.sp,

@@ -113,11 +113,11 @@ object ExifMetadataHelper {
                 "${MediaStore.MediaColumns.DATA} = ?"
             }
             val selectionArgs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                arrayOf(fileName, "Pictures/ExifCopy/", "Pictures/ExifCopy")
+                arrayOf(fileName, "Pictures/EXIFCopy/", "Pictures/EXIFCopy")
             } else {
                 val path = File(
                     Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-                    "ExifCopy/$fileName"
+                    "EXIFCopy/$fileName"
                 ).absolutePath
                 arrayOf(path)
             }
@@ -140,7 +140,7 @@ object ExifMetadataHelper {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
                     put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/ExifCopy")
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/EXIFCopy")
                     }
                 }
                 logUri = resolver.insert(MediaStore.Files.getContentUri("external"), contentValues)
@@ -631,7 +631,7 @@ object ExifMetadataHelper {
                     log(context, "Lưu EXIF attributes không bắt buộc: ${e.message}")
                 }
 
-                // Save to public storage (Pictures/ExifCopy)
+                // Save to public storage (Pictures/EXIFCopy)
                 val baseName = getBaseName(rawFileName)
                 val nameWithSuffix = "$baseName$suffix"
                 val fileName = getUniqueFileName(context, nameWithSuffix, tempExt)
@@ -639,7 +639,7 @@ object ExifMetadataHelper {
                 val savedUri = saveToPublicPictures(context, runTempFile, fileName, outputMimeType)
                 if (savedUri != null) {
                     savedUris.add(savedUri)
-                    log(context, "Đã lưu bản sao vào Pictures/ExifCopy: $fileName. Output URI: $savedUri")
+                    log(context, "Đã lưu bản sao vào Pictures/EXIFCopy: $fileName. Output URI: $savedUri")
                 }
                 runTempFile.delete()
             }
@@ -780,7 +780,7 @@ object ExifMetadataHelper {
                 val nameWithSuffix = "$baseName$suffix"
                 val fileName = getUniqueFileName(context, nameWithSuffix, tempExt)
                 val savedUri = saveToPublicPictures(context, runTempFile, fileName, targetMimeType)
-                log(context, "Đã lưu bản sao vào Pictures/ExifCopy: $fileName. Output URI: $savedUri")
+                log(context, "Đã lưu bản sao vào Pictures/EXIFCopy: $fileName. Output URI: $savedUri")
                 runTempFile.delete()
                 lastSavedUri = savedUri
             }
@@ -914,7 +914,7 @@ object ExifMetadataHelper {
                 val savedUri = saveToPublicPictures(context, runTempFile, fileName, targetMimeType)
                 if (savedUri != null) {
                     savedUris.add(savedUri)
-                    log(context, "Đã lưu bản sao vào Pictures/ExifCopy: $fileName. Output URI: $savedUri")
+                    log(context, "Đã lưu bản sao vào Pictures/EXIFCopy: $fileName. Output URI: $savedUri")
                 }
                 runTempFile.delete()
             }
@@ -929,7 +929,7 @@ object ExifMetadataHelper {
 
     private fun saveToPublicPictures(context: Context, sourceFile: File, fileName: String, mimeType: String): Uri? {
         try {
-            val targetDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "ExifCopy")
+            val targetDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "EXIFCopy")
             if (!targetDir.exists()) targetDir.mkdirs()
             val targetFile = File(targetDir, fileName)
             sourceFile.copyTo(targetFile, overwrite = true)
@@ -947,7 +947,7 @@ object ExifMetadataHelper {
             put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
             put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/ExifCopy")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/EXIFCopy")
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
         }
@@ -1189,11 +1189,11 @@ object ExifMetadataHelper {
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND (${MediaStore.MediaColumns.RELATIVE_PATH} = ? OR ${MediaStore.MediaColumns.RELATIVE_PATH} = ?)"
-            selectionArgs = arrayOf(fileName, "Pictures/ExifCopy/", "Pictures/ExifCopy")
+            selectionArgs = arrayOf(fileName, "Pictures/EXIFCopy/", "Pictures/EXIFCopy")
         } else {
             val path = File(
                 Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-                "ExifCopy/$fileName"
+                "EXIFCopy/$fileName"
             ).absolutePath
             selection = "${MediaStore.MediaColumns.DATA} = ?"
             selectionArgs = arrayOf(path)
