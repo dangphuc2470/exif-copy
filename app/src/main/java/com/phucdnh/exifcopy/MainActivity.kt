@@ -1908,6 +1908,8 @@ fun ImagePreviewDialog(
             handleDismiss()
         }
 
+        var lastTapTime by remember { mutableStateOf(0L) }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -1918,40 +1920,6 @@ fun ImagePreviewDialog(
                 ) {
                     // Instant zero-delay dismiss when tapping outside the photo
                     handleDismiss()
-                }
-                .pointerInput(Unit) {
-                    awaitEachGesture {
-                        awaitFirstDown(requireUnconsumed = false)
-                        do {
-                            val event = awaitPointerEvent()
-                            val zoom = event.calculateZoom()
-                            val pan = event.calculatePan()
-
-                            if (zoom != 1f || pan.getDistance() > 2f) {
-                                val currentScale = scaleAnim.value
-                                val newScale = (currentScale * zoom).coerceIn(0.7f, 8f)
-                                val dampening = if (newScale < 1f) 0.35f else 1f
-                                val newOffsetX = offsetXAnim.value + pan.x * dampening
-                                val newOffsetY = offsetYAnim.value + pan.y * dampening
-
-                                coroutineScope.launch {
-                                    scaleAnim.snapTo(newScale)
-                                    offsetXAnim.snapTo(newOffsetX)
-                                    offsetYAnim.snapTo(newOffsetY)
-                                }
-                                event.changes.forEach { it.consume() }
-                            }
-                        } while (event.changes.any { it.pressed })
-
-                        // When user lifts all fingers: spring smoothly back to 1x center if scale <= 1.05f or below 1x
-                        if (scaleAnim.value <= 1.05f) {
-                            coroutineScope.launch {
-                                launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 340f)) }
-                                launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 340f)) }
-                                launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 340f)) }
-                            }
-                        }
-                    }
                 },
             contentAlignment = Alignment.Center
         ) {
@@ -1987,30 +1955,73 @@ fun ImagePreviewDialog(
                             shape = RoundedCornerShape(16.dp)
                         )
                         .pointerInput(Unit) {
-                            detectTapGestures(
-                                onDoubleTap = {
-                                    coroutineScope.launch {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                val downTime = System.currentTimeMillis()
+                                var hasTransform = false
+
+                                do {
+                                    val event = awaitPointerEvent()
+                                    val zoom = event.calculateZoom()
+                                    val pan = event.calculatePan()
+
+                                    if (zoom != 1f || pan.getDistance() > 2f) {
+                                        hasTransform = true
+                                        val currentScale = scaleAnim.value
+                                        val newScale = (currentScale * zoom).coerceIn(0.7f, 8f)
+                                        val dampening = if (newScale < 1f) 0.35f else 1f
+                                        val newOffsetX = offsetXAnim.value + pan.x * dampening
+                                        val newOffsetY = offsetYAnim.value + pan.y * dampening
+
+                                        coroutineScope.launch {
+                                            scaleAnim.snapTo(newScale)
+                                            offsetXAnim.snapTo(newOffsetX)
+                                            offsetYAnim.snapTo(newOffsetY)
+                                        }
+                                        event.changes.forEach { it.consume() }
+                                    }
+                                } while (event.changes.any { it.pressed })
+
+                                val elapsed = System.currentTimeMillis() - downTime
+                                if (!hasTransform && elapsed < 320) {
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastTapTime < 320) {
+                                        // Double tap!
+                                        lastTapTime = 0L
+                                        coroutineScope.launch {
+                                            if (scaleAnim.value > 1.05f) {
+                                                launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                                launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                                launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                            } else {
+                                                launch { scaleAnim.animateTo(2.5f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                            }
+                                        }
+                                    } else {
+                                        lastTapTime = now
                                         if (scaleAnim.value > 1.05f) {
-                                            launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                            launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                            launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                            coroutineScope.launch {
+                                                launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                                launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                                launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                            }
                                         } else {
-                                            launch { scaleAnim.animateTo(2.5f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
+                                            coroutineScope.launch {
+                                                kotlinx.coroutines.delay(280)
+                                                if (lastTapTime == now && scaleAnim.value <= 1.05f) {
+                                                    handleDismiss()
+                                                }
+                                            }
                                         }
                                     }
-                                },
-                                onTap = {
-                                    if (scaleAnim.value <= 1.05f) {
-                                        handleDismiss()
-                                    } else {
-                                        coroutineScope.launch {
-                                            launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                            launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                            launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 380f)) }
-                                        }
+                                } else if (scaleAnim.value <= 1.05f) {
+                                    coroutineScope.launch {
+                                        launch { scaleAnim.animateTo(1f, spring(dampingRatio = 0.82f, stiffness = 340f)) }
+                                        launch { offsetXAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 340f)) }
+                                        launch { offsetYAnim.animateTo(0f, spring(dampingRatio = 0.82f, stiffness = 340f)) }
                                     }
                                 }
-                            )
+                            }
                         }
                 ) {
                     AsyncImage(
