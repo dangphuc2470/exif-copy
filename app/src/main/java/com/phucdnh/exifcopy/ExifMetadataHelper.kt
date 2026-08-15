@@ -244,7 +244,8 @@ object ExifMetadataHelper {
         itemIndex: Int = 0,
         replaceOriginal: Boolean = false,
         removeWatermark: Boolean = false,
-        watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA
+        watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA,
+        upscaleBlend: Boolean = false
     ): Uri? {
         return copyMetadataList(
             context = context,
@@ -254,7 +255,8 @@ object ExifMetadataHelper {
             itemIndex = itemIndex,
             replaceOriginal = replaceOriginal,
             removeWatermark = removeWatermark,
-            watermarkMode = watermarkMode
+            watermarkMode = watermarkMode,
+            upscaleBlend = upscaleBlend
         ).lastOrNull()
     }
 
@@ -266,7 +268,8 @@ object ExifMetadataHelper {
         itemIndex: Int = 0,
         replaceOriginal: Boolean = false,
         removeWatermark: Boolean = false,
-        watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA
+        watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA,
+        upscaleBlend: Boolean = false
     ): List<Uri> {
         val savedUris = mutableListOf<Uri>()
         try {
@@ -636,8 +639,71 @@ object ExifMetadataHelper {
                 val nameWithSuffix = "$baseName$suffix"
                 val fileName = getUniqueFileName(context, nameWithSuffix, tempExt)
                 log(context, "Tên file đích cuối cùng: $fileName")
-                val savedUri = saveToPublicPictures(context, runTempFile, fileName, outputMimeType)
+                var savedUri = saveToPublicPictures(context, runTempFile, fileName, outputMimeType)
                 if (savedUri != null) {
+                    // Upscale & Blend: use source (hi-res original) + saved output (AI-edited with EXIF) → blend
+                    if (upscaleBlend) {
+                        try {
+                            log(context, "--- BẮT ĐẦU UPSCALE & BLEND ---")
+                            val decodeOpts = BitmapFactory.Options().apply {
+                                inPreferredConfig = Bitmap.Config.ARGB_8888
+                                inMutable = false
+                            }
+                            val sourceBitmap = context.contentResolver.openInputStream(sourceUri)
+                                ?.use { BitmapFactory.decodeStream(it, null, decodeOpts) }
+                            val savedFilePath = getFilePathFromUri(context, savedUri)
+                            val editedBitmap = if (savedFilePath != null) {
+                                BitmapFactory.decodeFile(savedFilePath, decodeOpts)
+                            } else {
+                                context.contentResolver.openInputStream(savedUri)
+                                    ?.use { BitmapFactory.decodeStream(it, null, decodeOpts) }
+                            }
+                            if (sourceBitmap != null && editedBitmap != null) {
+                                val blendResult = AiImageBlender.blendImages(sourceBitmap, editedBitmap)
+                                log(context, "Upscale & Blend xong: diffPixels=${blendResult.diffPixelCount}/${blendResult.totalPixelCount}")
+                                // Overwrite the saved file with blended result
+                                val blendTempFile = File.createTempFile("exif_blend_out", tempExt, context.cacheDir)
+                                FileOutputStream(blendTempFile).use { output ->
+                                    val compressFormat = when {
+                                        tempExt.equals(".png", ignoreCase = true) -> android.graphics.Bitmap.CompressFormat.PNG
+                                        tempExt.equals(".webp", ignoreCase = true) -> {
+                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                                android.graphics.Bitmap.CompressFormat.WEBP_LOSSLESS
+                                            } else {
+                                                @Suppress("DEPRECATION")
+                                                android.graphics.Bitmap.CompressFormat.WEBP
+                                            }
+                                        }
+                                        else -> android.graphics.Bitmap.CompressFormat.JPEG
+                                    }
+                                    val quality = if (compressFormat == android.graphics.Bitmap.CompressFormat.PNG) 100 else 95
+                                    blendResult.bitmap.compress(compressFormat, quality, output)
+                                }
+                                blendResult.bitmap.recycle()
+                                // Re-apply EXIF to blended file
+                                val blendExif = ExifInterface(blendTempFile.absolutePath)
+                                for ((tag, value) in sourceAttributes) {
+                                    blendExif.setAttribute(tag, value)
+                                }
+                                try { blendExif.saveAttributes() } catch (_: Exception) {}
+                                // Overwrite the existing savedUri file path
+                                val blendFileName = getUniqueFileName(context, "${baseName}${suffix}_blend", tempExt)
+                                val blendedUri = saveToPublicPictures(context, blendTempFile, blendFileName, outputMimeType)
+                                blendTempFile.delete()
+                                if (blendedUri != null) {
+                                    // Replace original savedUri entry with the blended one
+                                    savedUri = blendedUri
+                                    log(context, "Đã lưu ảnh blend: $blendFileName. URI: $blendedUri")
+                                }
+                            } else {
+                                log(context, "Upscale & Blend: không decode được bitmap (source=$sourceBitmap, edited=$editedBitmap)")
+                            }
+                            sourceBitmap?.recycle()
+                            editedBitmap?.recycle()
+                        } catch (e: Exception) {
+                            log(context, "Lỗi Upscale & Blend: ${e.message}")
+                        }
+                    }
                     savedUris.add(savedUri)
                     log(context, "Đã lưu bản sao vào Pictures/EXIFCopy: $fileName. Output URI: $savedUri")
                 }
@@ -1232,6 +1298,113 @@ object ExifMetadataHelper {
                 return candidate
             }
             counter++
+        }
+    }
+    fun runUpscaleBlendWithProgress(
+        context: Context,
+        sourceUri: Uri,
+        editedUri: Uri,
+        diffThreshold: Float = AiImageBlender.DEFAULT_DIFF_THRESHOLD,
+        featherSigma: Float = AiImageBlender.DEFAULT_FEATHER_SIGMA,
+        dilateRadius: Int = AiImageBlender.DEFAULT_DILATE_RADIUS,
+        onProgress: ((AiImageBlender.BlendProgress) -> Unit)? = null
+    ): Uri? {
+        try {
+            log(context, "--- BẮT ĐẦU UPSCALE & BLEND CHUYÊN DỤNG ---")
+            log(context, "Original URI (A): $sourceUri")
+            log(context, "Edited URI (B): $editedUri")
+
+            onProgress?.invoke(
+                AiImageBlender.BlendProgress(
+                    step = 1,
+                    percent = 0.05f,
+                    messageVi = "Đang tải ảnh gốc và ảnh AI edit...",
+                    messageEn = "Loading original and AI edited images..."
+                )
+            )
+
+            val decodeOpts = BitmapFactory.Options().apply {
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+                inMutable = false
+            }
+
+            val sourceBitmap = context.contentResolver.openInputStream(sourceUri)
+                ?.use { BitmapFactory.decodeStream(it, null, decodeOpts) }
+            val editedBitmap = context.contentResolver.openInputStream(editedUri)
+                ?.use { BitmapFactory.decodeStream(it, null, decodeOpts) }
+
+            if (sourceBitmap == null || editedBitmap == null) {
+                log(context, "LỖI: Không thể giải mã bitmap (source=$sourceBitmap, edited=$editedBitmap)")
+                return null
+            }
+
+            // Extract EXIF tags from original image
+            val sourceAttributes = HashMap<String, String>()
+            try {
+                context.contentResolver.openInputStream(sourceUri)?.use { input ->
+                    val exif = ExifInterface(input)
+                    for (tag in TAGS_TO_COPY) {
+                        val rawVal = exif.getAttribute(tag)
+                        if (rawVal != null) {
+                            sourceAttributes[tag] = rawVal
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                log(context, "Không đọc được EXIF ảnh nguồn: ${e.message}")
+            }
+
+            // Run blending pipeline with progress
+            val blendResult = AiImageBlender.blendImages(
+                originalBitmap = sourceBitmap,
+                editedBitmap = editedBitmap,
+                diffThreshold = diffThreshold,
+                featherSigma = featherSigma,
+                dilateRadius = dilateRadius,
+                onProgress = onProgress
+            )
+
+            val rawEditedName = getFileName(context, editedUri) ?: "ai_edited_${System.currentTimeMillis()}"
+            val baseName = "upscale_blend_" + getBaseName(rawEditedName)
+            val tempExt = ".jpg"
+            val outputMimeType = "image/jpeg"
+
+            val tempFile = File.createTempFile("blend_run_temp", tempExt, context.cacheDir)
+            FileOutputStream(tempFile).use { output ->
+                blendResult.bitmap.compress(Bitmap.CompressFormat.JPEG, 98, output)
+                output.flush()
+            }
+            blendResult.bitmap.recycle()
+            sourceBitmap.recycle()
+            editedBitmap.recycle()
+
+            // Inject EXIF
+            try {
+                val tempExif = ExifInterface(tempFile.absolutePath)
+                for ((tag, value) in sourceAttributes) {
+                    tempExif.setAttribute(tag, value)
+                }
+                tempExif.saveAttributes()
+            } catch (e: Exception) {
+                log(context, "Lưu EXIF cho ảnh blend: ${e.message}")
+            }
+
+            val fileName = getUniqueFileName(context, baseName, tempExt)
+            val savedUri = saveToPublicPictures(context, tempFile, fileName, outputMimeType)
+            tempFile.delete()
+
+            if (savedUri != null) {
+                log(context, "Đã lưu ảnh Upscale & Blend thành công: $fileName (URI: $savedUri)")
+            } else {
+                log(context, "LỖI: Không thể lưu ảnh Upscale & Blend")
+            }
+
+            flushLogToPublicStorage(context)
+            return savedUri
+        } catch (e: Exception) {
+            val errorMsg = "LỖI TRONG runUpscaleBlendWithProgress: ${e.message}\n${Log.getStackTraceString(e)}"
+            log(context, errorMsg)
+            return null
         }
     }
 }

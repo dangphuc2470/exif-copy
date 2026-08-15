@@ -22,6 +22,7 @@ object Strings {
     // Tabs
     fun tabCopyExif(isVi: Boolean) = if (isVi) "Sao chép EXIF" else "Copy EXIF"
     fun tabRemoveAi(isVi: Boolean) = if (isVi) "Xóa nhãn AI" else "Remove AI label"
+    fun tabUpscaleBlend(isVi: Boolean) = if (isVi) "Ghép & Phóng to" else "Upscale & Blend"
     fun tabLogs(isVi: Boolean) = if (isVi) "Nhật ký" else "Logs"
     fun tabSettings(isVi: Boolean) = if (isVi) "Cài đặt" else "Settings"
 
@@ -39,17 +40,39 @@ object Strings {
     fun resultImagesTitle(isVi: Boolean, count: Int) = if (isVi) "Ảnh kết quả ($count)" else "Result images ($count)"
     fun clearResults(isVi: Boolean) = if (isVi) "Xóa kết quả" else "Clear results"
 
+    // Upscale & Blend Tab Strings
+    fun upscaleOriginalTitle(isVi: Boolean) = if (isVi) "1. Ảnh gốc High-Res (A)" else "1. High-Res Original (A)"
+    fun upscaleEditedTitle(isVi: Boolean) = if (isVi) "2. Ảnh AI Edit Low-Res (B)" else "2. Low-Res AI Edited (B)"
+    fun emptyUpscaleOriginalMsg(isVi: Boolean) = if (isVi) "Chưa chọn ảnh gốc.\nẢnh dùng để lấy độ phân giải và chi tiết nét." else "No original image selected.\nProvides resolution & sharp pixels."
+    fun emptyUpscaleEditedMsg(isVi: Boolean) = if (isVi) "Chưa chọn ảnh AI edit.\nẢnh chứa nội dung bạn đã chỉnh sửa." else "No AI edited image selected.\nContains your AI modifications."
+    fun upscaleBlendAction(isVi: Boolean) = if (isVi) "Bắt đầu Phóng to & Hòa trộn" else "Start Upscale & Blend"
+    fun diffThresholdSlider(isVi: Boolean, value: Int) = if (isVi) "Độ nhạy nhận diện (Threshold: $value)" else "Detection Sensitivity (Threshold: $value)"
+    fun featherSigmaSlider(isVi: Boolean, value: Int) = if (isVi) "Độ mềm đường viền (Feather: ${value}px)" else "Edge Softness (Feather: ${value}px)"
+    fun upscaleBlendSettingsTitle(isVi: Boolean) = if (isVi) "Tùy chỉnh thuật toán hòa trộn" else "Blending Algorithm Settings"
+    fun realtimeMaskPreviewTitle(isVi: Boolean) = if (isVi) "Xem trước mặt nạ (Realtime)" else "Realtime Mask Preview"
+    fun selectBothImagesToPreview(isVi: Boolean) = if (isVi) "Chọn cả 2 ảnh phía trên để xem trước mặt nạ trực tiếp" else "Select both images above to see live mask preview"
+    fun diffPixelsDetectedShort(isVi: Boolean, count: Int, percent: Float) = if (isVi) "$count pixel vùng đỏ (${String.format(java.util.Locale.US, "%.1f", percent)}%)" else "$count red pixels (${String.format(java.util.Locale.US, "%.1f", percent)}%)"
+
+
+    // Visual Loading Dialog
+    fun visualLoadingTitle(isVi: Boolean) = if (isVi) "Đang xử lý Upscale & Blend" else "Processing Upscale & Blend"
+    fun maskPreviewHeader(isVi: Boolean) = if (isVi) "Mặt nạ vùng AI thay đổi (Vùng đỏ):" else "Detected AI Modification Mask (Red Zone):"
+    fun diffPixelsDetected(isVi: Boolean, count: Int, percent: Float) = if (isVi) "Phát hiện $count pixel đã sửa (${String.format(java.util.Locale.US, "%.1f", percent)}%)" else "Detected $count modified pixels (${String.format(java.util.Locale.US, "%.1f", percent)}%)"
+
     // Controls
     fun swap(isVi: Boolean) = if (isVi) "Hoán đổi" else "Swap"
     fun exifSettingsBtn(isVi: Boolean) = if (isVi) "Cài đặt EXIF" else "EXIF settings"
     fun removeWatermarkCheckbox(isVi: Boolean) = if (isVi) "Xóa watermark" else "Remove watermark"
     fun copyExifAction(isVi: Boolean) = if (isVi) "Sao chép EXIF" else "Copy EXIF"
     fun removeAiAction(isVi: Boolean) = if (isVi) "Xóa nhãn AI" else "Remove AI label"
+    fun upscaleBlendCheckbox(isVi: Boolean) = if (isVi) "Upscale & Blend" else "Upscale & Blend"
+    fun processingUpscaleBlend(isVi: Boolean) = if (isVi) "Đang upscale & blend ảnh..." else "Upscaling & blending images..."
 
     // Messages & Toasts
     fun selectAtLeastOneSource(isVi: Boolean) = if (isVi) "Chọn ít nhất 1 ảnh nguồn!" else "Select at least 1 source image!"
     fun selectAtLeastOneTarget(isVi: Boolean) = if (isVi) "Chọn ít nhất 1 ảnh đích!" else "Select at least 1 target image!"
     fun selectAiTarget(isVi: Boolean) = if (isVi) "Chọn ảnh ở phần ảnh đích để xóa nhãn AI!" else "Select images in target section to remove AI labels!"
+    fun selectBothOriginalAndEdited(isVi: Boolean) = if (isVi) "Vui lòng chọn cả ảnh gốc (A) và ảnh AI edit (B)!" else "Please select both original (A) and edited (B) images!"
     fun processingCopyExif(isVi: Boolean) = if (isVi) "Đang sao chép EXIF..." else "Copying EXIF..."
     fun processingRemoveAiAndWatermark(isVi: Boolean) = if (isVi) "Đang xóa nhãn AI & watermark..." else "Removing AI labels & watermark..."
     fun processingRemoveAiOnly(isVi: Boolean) = if (isVi) "Đang xóa nhãn Google AI..." else "Removing Google AI labels..."
@@ -59,6 +82,7 @@ object Strings {
     fun logsCleared(isVi: Boolean) = if (isVi) "Đã xóa nhật ký!" else "Logs cleared!"
     fun updatedSettings(isVi: Boolean) = if (isVi) "Đã cập nhật cấu hình random EXIF!" else "Updated random EXIF settings!"
     fun savedResultToast(isVi: Boolean, count: Int, total: Int) = if (isVi) "Đã lưu $count/$total ảnh vào thư mục Pictures/EXIFCopy!" else "Saved $count/$total images to Pictures/EXIFCopy!"
+    fun blendSuccessToast(isVi: Boolean) = if (isVi) "Đã phóng to và ghép ảnh thành công vào Pictures/EXIFCopy!" else "Successfully upscaled and blended image to Pictures/EXIFCopy!"
 
     // Logs Tab
     fun logsTitle(isVi: Boolean) = if (isVi) "Nhật ký hoạt động (Log)" else "Activity logs"
@@ -85,4 +109,5 @@ object Strings {
     fun externalShareTitle(isVi: Boolean) = if (isVi) "Nhập ảnh từ bên ngoài" else "Import external images"
     fun externalShareMsg(isVi: Boolean, count: Int) = if (isVi) "Bạn muốn thêm $count ảnh đã chia sẻ vào danh sách nào?" else "Which list do you want to add $count shared images to?"
     fun skip(isVi: Boolean) = if (isVi) "Bỏ qua" else "Skip"
+
 }

@@ -5,12 +5,15 @@ import android.content.ClipboardManager
 import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.util.Log
 import android.widget.Toast
+import kotlin.math.roundToInt
 import org.json.JSONArray
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -32,6 +35,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.Brush
@@ -48,6 +52,7 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.platform.LocalView
@@ -367,6 +372,110 @@ fun MainScreen(
     var showSettingsDialog by remember { mutableStateOf(false) }
     var singleResultUri by remember { mutableStateOf<Uri?>(null) }
     var showOpenImageDialog by remember { mutableStateOf(false) }
+    var upscaleBlend by remember { mutableStateOf(false) }
+
+    // State for Tab 2: AI Upscale & Blend
+    val blendOriginalImages = remember { mutableStateListOf<ImageItem>() }
+    val blendEditedImages = remember { mutableStateListOf<ImageItem>() }
+    val blendResultImages = remember { mutableStateListOf<ImageItem>() }
+    val selectedBlendOrigIds = remember { mutableStateListOf<String>() }
+    val selectedBlendEditIds = remember { mutableStateListOf<String>() }
+    var blendDiffThreshold by remember { mutableFloatStateOf(AiImageBlender.DEFAULT_DIFF_THRESHOLD) }
+    var blendFeatherSigma by remember { mutableFloatStateOf(AiImageBlender.DEFAULT_FEATHER_SIGMA) }
+    var blendProgressState by remember { mutableStateOf<AiImageBlender.BlendProgress?>(null) }
+    var isVisualBlendRunning by remember { mutableStateOf(false) }
+
+    // Realtime mask preview state & thumbnail cache for instant slider updates
+    var realtimeMaskData by remember { mutableStateOf<AiImageBlender.MaskPreviewData?>(null) }
+    var cachedOrigThumb by remember { mutableStateOf<Bitmap?>(null) }
+    var cachedEditThumb by remember { mutableStateOf<Bitmap?>(null) }
+
+    val firstOrigUri = blendOriginalImages.firstOrNull()?.uri
+    val firstEditUri = blendEditedImages.firstOrNull()?.uri
+
+    LaunchedEffect(firstOrigUri, firstEditUri) {
+        if (firstOrigUri != null && firstEditUri != null) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val opts = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }
+                    val rawOrig = context.contentResolver.openInputStream(firstOrigUri)?.use {
+                        BitmapFactory.decodeStream(it, null, opts)
+                    }
+                    val rawEdit = context.contentResolver.openInputStream(firstEditUri)?.use {
+                        BitmapFactory.decodeStream(it, null, opts)
+                    }
+                    if (rawOrig != null && rawEdit != null) {
+                        val maxDim = 720
+                        val scale = if (kotlin.math.max(rawEdit.width, rawEdit.height) > maxDim) {
+                            maxDim.toFloat() / kotlin.math.max(rawEdit.width, rawEdit.height)
+                        } else 1.0f
+                        val tw = (rawEdit.width * scale).roundToInt().coerceAtLeast(1)
+                        val th = (rawEdit.height * scale).roundToInt().coerceAtLeast(1)
+
+                        val thumbOrig = Bitmap.createScaledBitmap(rawOrig, tw, th, true)
+                        val thumbEdit = Bitmap.createScaledBitmap(rawEdit, tw, th, true)
+                        rawOrig.recycle()
+                        rawEdit.recycle()
+
+                        withContext(Dispatchers.Main) {
+                            cachedOrigThumb?.recycle()
+                            cachedEditThumb?.recycle()
+                            cachedOrigThumb = thumbOrig
+                            cachedEditThumb = thumbEdit
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("RealtimePreview", "Error loading thumbnails: ${e.message}")
+                }
+            }
+        } else {
+            cachedOrigThumb?.recycle()
+            cachedEditThumb?.recycle()
+            cachedOrigThumb = null
+            cachedEditThumb = null
+            realtimeMaskData = null
+        }
+    }
+
+    LaunchedEffect(blendDiffThreshold, cachedOrigThumb, cachedEditThumb) {
+        val orig = cachedOrigThumb
+        val edit = cachedEditThumb
+        if (orig != null && edit != null && !orig.isRecycled && !edit.isRecycled) {
+            withContext(Dispatchers.Default) {
+                val preview = AiImageBlender.generateQuickMaskPreview(
+                    origLowBitmap = orig,
+                    editedLowBitmap = edit,
+                    diffThreshold = blendDiffThreshold
+                )
+                withContext(Dispatchers.Main) {
+                    realtimeMaskData = preview
+                }
+            }
+        } else {
+            realtimeMaskData = null
+        }
+    }
+
+    val pickBlendOriginalLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        uris.forEach { uri ->
+            if (!blendOriginalImages.any { it.uri == uri }) {
+                blendOriginalImages.add(ImageItem(uri))
+            }
+        }
+    }
+
+    val pickBlendEditedLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        uris.forEach { uri ->
+            if (!blendEditedImages.any { it.uri == uri }) {
+                blendEditedImages.add(ImageItem(uri))
+            }
+        }
+    }
+
 
     // Drag-and-drop controller
     val controller = remember {
@@ -413,7 +522,7 @@ fun MainScreen(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
-            // Tab Row Navigation (3 Tabs)
+            // Tab Row Navigation (4 Tabs)
             TabRow(
                 selectedTabIndex = activeTab,
                 containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
@@ -421,20 +530,26 @@ fun MainScreen(
                 Tab(
                     selected = activeTab == 0,
                     onClick = { activeTab = 0 },
-                    text = { Text(Strings.tabCopyExif(isVi), fontWeight = FontWeight.SemiBold) },
-                    icon = { Icon(Icons.Default.CopyAll, contentDescription = null) }
+                    text = { Text(Strings.tabCopyExif(isVi), fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    icon = { Icon(Icons.Default.CopyAll, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
                 Tab(
                     selected = activeTab == 1,
                     onClick = { activeTab = 1 },
-                    text = { Text(Strings.tabRemoveAi(isVi), fontWeight = FontWeight.SemiBold) },
-                    icon = { Icon(Icons.Default.DeleteForever, contentDescription = null) }
+                    text = { Text(Strings.tabRemoveAi(isVi), fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    icon = { Icon(Icons.Default.DeleteForever, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
                 Tab(
                     selected = activeTab == 2,
                     onClick = { activeTab = 2 },
-                    text = { Text(Strings.tabSettings(isVi), fontWeight = FontWeight.SemiBold) },
-                    icon = { Icon(Icons.Default.Settings, contentDescription = null) }
+                    text = { Text(Strings.tabUpscaleBlend(isVi), fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    icon = { Icon(Icons.Default.AutoFixHigh, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                )
+                Tab(
+                    selected = activeTab == 3,
+                    onClick = { activeTab = 3 },
+                    text = { Text(Strings.tabSettings(isVi), fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    icon = { Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
             }
             Box(
@@ -915,6 +1030,44 @@ fun MainScreen(
                                     }
                                 }
 
+                                // Upscale & Blend checkbox (same row below, or separate row)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .weight(1f, fill = false)
+                                            .clickable { upscaleBlend = !upscaleBlend }
+                                    ) {
+                                        Checkbox(
+                                            checked = upscaleBlend,
+                                            onCheckedChange = { upscaleBlend = it }
+                                        )
+                                        Text(
+                                            text = Strings.upscaleBlendCheckbox(isVi),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    if (upscaleBlend) {
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Icon(
+                                            Icons.Default.AutoFixHigh,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+
+
                                 // ACTION BUTTON (Full Width)
                                 Button(
                                     onClick = {
@@ -929,11 +1082,11 @@ fun MainScreen(
 
                                         // Start execution in background thread
                                         isProcessing = true
-                                        processingMessage = Strings.processingCopyExif(isVi)
+                                        processingMessage = if (upscaleBlend) Strings.processingUpscaleBlend(isVi) else Strings.processingCopyExif(isVi)
                                         
                                         // Clear old logs and start new log stream
                                         ExifMetadataHelper.clearLog(context)
-                                        ExifMetadataHelper.log(context, "Bắt đầu tiến trình sao chép EXIF cho ${targetImages.size} ảnh (Xóa Watermark=$removeWatermark, Mode=${watermarkMode.displayName})")
+                                        ExifMetadataHelper.log(context, "Bắt đầu tiến trình sao chép EXIF cho ${targetImages.size} ảnh (Xóa Watermark=$removeWatermark, Mode=${watermarkMode.displayName}, Upscale&Blend=$upscaleBlend)")
                                         
                                         scope.launch {
                                             var successCount = 0
@@ -963,7 +1116,8 @@ fun MainScreen(
                                                         settings = activeSettings,
                                                         replaceOriginal = false,
                                                         removeWatermark = removeWatermark,
-                                                        watermarkMode = watermarkMode
+                                                        watermarkMode = watermarkMode,
+                                                        upscaleBlend = upscaleBlend
                                                     )
                                                     if (outputUris.isNotEmpty()) {
                                                         successCount += outputUris.size
@@ -1291,6 +1445,497 @@ fun MainScreen(
                         }
                     }
                     2 -> {
+                        // -----------------------------------------------------------------
+                        // TAB 2: GHÉP & PHÓNG TO AI (UPSCALE & BLEND)
+                        // -----------------------------------------------------------------
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            val tab2ScrollState = rememberScrollState()
+
+                            // SCROLLABLE MIDDLE CONTENT WRAPPER WITH FADING GRADIENT
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .verticalScroll(tab2ScrollState)
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                                ) {
+                                    // CONTAINER 1: ORIGINAL HIGH-RES (A)
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .border(
+                                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                                shape = CardDefaults.shape
+                                            ),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                        )
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(12.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = Strings.upscaleOriginalTitle(isVi),
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                Button(
+                                                    onClick = { pickBlendOriginalLauncher.launch(arrayOf("image/*")) },
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 5.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(Strings.selectImages(isVi))
+                                                }
+                                            }
+
+                                            Spacer(modifier = Modifier.height(8.dp))
+
+                                            if (blendOriginalImages.isEmpty()) {
+                                                EmptyContainerState(
+                                                    message = Strings.emptyUpscaleOriginalMsg(isVi),
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(130.dp)
+                                                )
+                                            } else {
+                                                LazyRow(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(130.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                    contentPadding = PaddingValues(vertical = 4.dp)
+                                                ) {
+                                                    itemsIndexed(blendOriginalImages, key = { _, item -> item.id }) { index, item ->
+                                                        ImageItemCard(
+                                                            item = item,
+                                                            index = index,
+                                                            isSource = true,
+                                                            isSelected = selectedBlendOrigIds.contains(item.id),
+                                                            onToggleSelection = { selected ->
+                                                                if (selected) selectedBlendOrigIds.add(item.id) else selectedBlendOrigIds.remove(item.id)
+                                                            },
+                                                            selectedIds = selectedBlendOrigIds.toSet(),
+                                                            onRemove = {
+                                                                blendOriginalImages.remove(item)
+                                                                selectedBlendOrigIds.remove(item.id)
+                                                            },
+                                                            onGlobalPositionUpdate = { },
+                                                            controller = controller,
+                                                            sourceBounds = Rect.Zero,
+                                                            targetBounds = Rect.Zero,
+                                                            onDragEnded = { },
+                                                            onPreview = {
+                                                                onOpenPreview(it, false) {
+                                                                    blendOriginalImages.remove(item)
+                                                                    selectedBlendOrigIds.remove(item.id)
+                                                                }
+                                                            }
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // CONTAINER 2: AI EDITED LOW-RES (B)
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .border(
+                                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                                shape = CardDefaults.shape
+                                            ),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                        )
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(12.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = Strings.upscaleEditedTitle(isVi),
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                Button(
+                                                    onClick = { pickBlendEditedLauncher.launch(arrayOf("image/*")) },
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 5.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(Strings.selectImages(isVi))
+                                                }
+                                            }
+
+                                            Spacer(modifier = Modifier.height(8.dp))
+
+                                            if (blendEditedImages.isEmpty()) {
+                                                EmptyContainerState(
+                                                    message = Strings.emptyUpscaleEditedMsg(isVi),
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(130.dp)
+                                                )
+                                            } else {
+                                                LazyRow(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(130.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                    contentPadding = PaddingValues(vertical = 4.dp)
+                                                ) {
+                                                    itemsIndexed(blendEditedImages, key = { _, item -> item.id }) { index, item ->
+                                                        ImageItemCard(
+                                                            item = item,
+                                                            index = index,
+                                                            isSource = false,
+                                                            isSelected = selectedBlendEditIds.contains(item.id),
+                                                            onToggleSelection = { selected ->
+                                                                if (selected) selectedBlendEditIds.add(item.id) else selectedBlendEditIds.remove(item.id)
+                                                            },
+                                                            selectedIds = selectedBlendEditIds.toSet(),
+                                                            onRemove = {
+                                                                blendEditedImages.remove(item)
+                                                                selectedBlendEditIds.remove(item.id)
+                                                            },
+                                                            onGlobalPositionUpdate = { },
+                                                            controller = controller,
+                                                            sourceBounds = Rect.Zero,
+                                                            targetBounds = Rect.Zero,
+                                                            onDragEnded = { },
+                                                            onPreview = {
+                                                                onOpenPreview(it, false) {
+                                                                    blendEditedImages.remove(item)
+                                                                    selectedBlendEditIds.remove(item.id)
+                                                                }
+                                                            }
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // TUNING SETTINGS ACCORDION CARD
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                                        )
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Tune,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                                Text(
+                                                    text = Strings.upscaleBlendSettingsTitle(isVi),
+                                                    style = MaterialTheme.typography.labelLarge,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            }
+
+                                            // Slider 1: Diff Threshold (Expanded range 2..200)
+                                            Column {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Text(
+                                                        text = Strings.diffThresholdSlider(isVi, blendDiffThreshold.toInt()),
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        fontWeight = FontWeight.Medium
+                                                    )
+                                                    Text(
+                                                        text = "2 - 200",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                                    )
+                                                }
+                                                Slider(
+                                                    value = blendDiffThreshold,
+                                                    onValueChange = { blendDiffThreshold = it },
+                                                    valueRange = 2f..200f,
+                                                    modifier = Modifier.height(24.dp)
+                                                )
+                                            }
+
+                                            // Slider 2: Feather Sigma (Expanded range 0..40px)
+                                            Column {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Text(
+                                                        text = Strings.featherSigmaSlider(isVi, blendFeatherSigma.toInt()),
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        fontWeight = FontWeight.Medium
+                                                    )
+                                                    Text(
+                                                        text = "0 - 40px",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                                    )
+                                                }
+                                                Slider(
+                                                    value = blendFeatherSigma,
+                                                    onValueChange = { blendFeatherSigma = it },
+                                                    valueRange = 0f..40f,
+                                                    modifier = Modifier.height(24.dp)
+                                                )
+                                            }
+
+                                            // Realtime Mask Preview Display (Expanded HD Aspect Ratio)
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                            Spacer(modifier = Modifier.height(6.dp))
+
+                                            val maskData = realtimeMaskData
+                                            if (maskData != null) {
+                                                Column(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                        ) {
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .size(8.dp)
+                                                                    .clip(CircleShape)
+                                                                    .background(Color.Red)
+                                                            )
+                                                            Text(
+                                                                text = Strings.realtimeMaskPreviewTitle(isVi),
+                                                                style = MaterialTheme.typography.labelMedium,
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                        }
+                                                        if (maskData.diffPixelCount > 0 && maskData.totalPixelCount > 0) {
+                                                            val pct = (maskData.diffPixelCount.toFloat() / maskData.totalPixelCount.toFloat()) * 100f
+                                                            Text(
+                                                                text = Strings.diffPixelsDetectedShort(isVi, maskData.diffPixelCount, pct),
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                color = Color(0xFFFF5252),
+                                                                fontWeight = FontWeight.SemiBold
+                                                            )
+                                                        }
+                                                    }
+
+                                                    val previewBitmap = maskData.previewBitmap
+                                                    val aspect = (previewBitmap.width.toFloat() / previewBitmap.height.toFloat().coerceAtLeast(1f)).coerceIn(0.5f, 2.2f)
+
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .clip(RoundedCornerShape(10.dp))
+                                                            .background(Color.Black)
+                                                            .border(1.dp, Color(0xFFFF5252).copy(alpha = 0.6f), RoundedCornerShape(10.dp)),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Image(
+                                                            bitmap = previewBitmap.asImageBitmap(),
+                                                            contentDescription = "Realtime Mask Preview",
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .aspectRatio(aspect)
+                                                                .clip(RoundedCornerShape(10.dp)),
+                                                            contentScale = ContentScale.Fit
+                                                        )
+                                                    }
+                                                }
+                                            } else {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(vertical = 8.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        text = Strings.selectBothImagesToPreview(isVi),
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                                        textAlign = TextAlign.Center
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+
+
+                                    // CONTAINER 3: RESULT IMAGES
+                                    if (blendResultImages.isNotEmpty()) {
+                                        ResultImagesSection(
+                                            resultImages = blendResultImages,
+                                            onClearResults = {
+                                                blendResultImages.forEach { deleteProcessedImage(context, it.uri) }
+                                                blendResultImages.clear()
+                                            },
+                                            onRemoveResult = {
+                                                deleteProcessedImage(context, it.uri)
+                                                blendResultImages.remove(it)
+                                            },
+                                            onPreview = { uri ->
+                                                onOpenPreview(uri, true) {
+                                                    deleteProcessedImage(context, uri)
+                                                    blendResultImages.removeAll { it.uri == uri }
+                                                }
+                                            },
+                                            isVi = isVi
+                                        )
+                                    }
+                                }
+
+                                // Bottom fading gradient
+                                if (tab2ScrollState.canScrollForward) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .fillMaxWidth()
+                                            .height(36.dp)
+                                            .background(
+                                                Brush.verticalGradient(
+                                                    colors = listOf(
+                                                        Color.Transparent,
+                                                        MaterialTheme.colorScheme.background.copy(alpha = 0.75f),
+                                                        MaterialTheme.colorScheme.background
+                                                    )
+                                                )
+                                            )
+                                    )
+                                }
+                            }
+
+                            // STICKY BOTTOM ACTION BUTTON
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.background)
+                                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                            ) {
+                                Button(
+                                    onClick = {
+                                        if (blendOriginalImages.isEmpty() || blendEditedImages.isEmpty()) {
+                                            Toast.makeText(context, Strings.selectBothOriginalAndEdited(isVi), Toast.LENGTH_SHORT).show()
+                                            return@Button
+                                        }
+
+                                        isVisualBlendRunning = true
+                                        blendProgressState = AiImageBlender.BlendProgress(
+                                            step = 1,
+                                            percent = 0.05f,
+                                            messageVi = "Đang chuẩn bị dữ liệu...",
+                                            messageEn = "Preparing image data..."
+                                        )
+
+                                        ExifMetadataHelper.clearLog(context)
+                                        ExifMetadataHelper.log(context, "Bắt đầu Upscale & Blend độc lập (Ngưỡng=$blendDiffThreshold, Feather=$blendFeatherSigma)")
+
+                                        scope.launch {
+                                            var lastOutputUri: Uri? = null
+                                            val origCopy = blendOriginalImages.toList()
+                                            val editCopy = blendEditedImages.toList()
+                                            val createdUris = mutableListOf<Uri>()
+
+                                            withContext(Dispatchers.IO) {
+                                                for (i in editCopy.indices) {
+                                                    val editItem = editCopy[i]
+                                                    val origItem = if (origCopy.size == 1) origCopy[0] else origCopy[i % origCopy.size]
+
+                                                    val outputUri = ExifMetadataHelper.runUpscaleBlendWithProgress(
+                                                        context = context,
+                                                        sourceUri = origItem.uri,
+                                                        editedUri = editItem.uri,
+                                                        diffThreshold = blendDiffThreshold,
+                                                        featherSigma = blendFeatherSigma,
+                                                        onProgress = { progress ->
+                                                            scope.launch(Dispatchers.Main) {
+                                                                blendProgressState = progress
+                                                            }
+                                                        }
+                                                    )
+
+                                                    if (outputUri != null) {
+                                                        lastOutputUri = outputUri
+                                                        createdUris.add(outputUri)
+                                                    }
+                                                }
+                                            }
+
+                                            // Small delay so user sees 100% complete state
+                                            kotlinx.coroutines.delay(400)
+                                            isVisualBlendRunning = false
+
+                                            createdUris.forEach { uri ->
+                                                if (!blendResultImages.any { it.uri == uri }) {
+                                                    blendResultImages.add(0, ImageItem(uri))
+                                                }
+                                            }
+
+                                            Toast.makeText(context, Strings.blendSuccessToast(isVi), Toast.LENGTH_LONG).show()
+                                            if (lastOutputUri != null) {
+                                                singleResultUri = lastOutputUri
+                                                showOpenImageDialog = true
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                ) {
+                                    Icon(Icons.Default.AutoFixHigh, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(Strings.upscaleBlendAction(isVi))
+                                }
+                            }
+                        }
+                    }
+                    3 -> {
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -1367,6 +2012,17 @@ fun MainScreen(
                 }
             }
         }
+
+        // -----------------------------------------------------------------
+        // VISUAL UPSCALE & BLEND LOADING DIALOG (WITH RED MASK PREVIEW)
+        // -----------------------------------------------------------------
+        if (isVisualBlendRunning) {
+            VisualBlendLoadingDialog(
+                progress = blendProgressState,
+                isVi = isVi
+            )
+        }
+
 
         // -----------------------------------------------------------------
         // DRAG GHOST FLOATING THUMBNAIL
@@ -2711,3 +3367,235 @@ fun ResultImageItemCard(
         }
     }
 }
+
+// -----------------------------------------------------------------
+// VISUAL UPSCALE & BLEND LOADING DIALOG COMPONENT
+// -----------------------------------------------------------------
+@Composable
+fun VisualBlendLoadingDialog(
+    progress: AiImageBlender.BlendProgress?,
+    isVi: Boolean
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.65f))
+            .clickable(enabled = false) {},
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .padding(16.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // Header
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        Icons.Default.AutoFixHigh,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Text(
+                        text = Strings.visualLoadingTitle(isVi),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                // Visual Red Mask Preview Area
+                val maskBitmap = progress?.maskPreviewBitmap
+                if (maskBitmap != null) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, Color(0xFFFF4444).copy(alpha = 0.5f), RoundedCornerShape(10.dp)),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.8f))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Red)
+                                )
+                                Text(
+                                    text = Strings.maskPreviewHeader(isVi),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+
+                            Image(
+                                bitmap = maskBitmap.asImageBitmap(),
+                                contentDescription = "Red Mask Preview",
+                                modifier = Modifier
+                                    .heightIn(max = 160.dp)
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(6.dp)),
+                                contentScale = ContentScale.Fit
+                            )
+
+                            if (progress.diffPixelCount > 0 && progress.totalPixelCount > 0) {
+                                val pct = (progress.diffPixelCount.toFloat() / progress.totalPixelCount.toFloat()) * 100f
+                                Text(
+                                    text = Strings.diffPixelsDetected(isVi, progress.diffPixelCount, pct),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFFFF8888),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(80.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            Text(
+                                text = progress?.getMessage(isVi) ?: "Đang xử lý...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                // Progress Bar & Percentage
+                val currentPct = progress?.percent ?: 0f
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = progress?.getMessage(isVi) ?: "",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "${(currentPct * 100).toInt()}%",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    LinearProgressIndicator(
+                        progress = { currentPct },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(4.dp)),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                // 5-Stage Checklist
+                val curStep = progress?.step ?: 1
+                val stepsVi = listOf(
+                    "1. Đọc & Căn chỉnh kích thước ảnh",
+                    "2. Phân tích sai biệt & Tạo Mask đỏ",
+                    "3. Làm mềm đường biên chuyển giao",
+                    "4. Nội suy Upscale Lanczos-3 độ nét cao",
+                    "5. Hòa trộn Pixel & Ghi thông tin EXIF"
+                )
+                val stepsEn = listOf(
+                    "1. Read & Align image dimensions",
+                    "2. Analyze differences & Create Red Mask",
+                    "3. Smooth boundary transitions",
+                    "4. Lanczos-3 High-Precision Upscaling",
+                    "5. Alpha-blend Pixels & Inject EXIF"
+                )
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    for (i in 1..5) {
+                        val stepTitle = if (isVi) stepsVi[i - 1] else stepsEn[i - 1]
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            when {
+                                curStep > i || (curStep == 5 && currentPct >= 1.0f) -> {
+                                    Icon(
+                                        Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        tint = Color(0xFF4CAF50),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                curStep == i -> {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                else -> {
+                                    Icon(
+                                        Icons.Default.RadioButtonUnchecked,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                            Text(
+                                text = stepTitle,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = if (curStep == i) FontWeight.Bold else FontWeight.Normal,
+                                color = if (curStep == i) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = if (curStep > i) 0.8f else 0.5f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
