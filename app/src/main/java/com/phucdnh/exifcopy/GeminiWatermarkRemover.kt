@@ -145,6 +145,21 @@ object GeminiWatermarkRemover {
         return rawMap
     }
 
+    private fun getAlphaMapForModeAndSize(mode: WatermarkMode, targetSize: Int): FloatArray {
+        val rawMap = when (mode) {
+            WatermarkMode.REVERSE_ALPHA_AUG13 -> interpolateAlphaMap(getAlphaMap24(), 24, targetSize)
+            WatermarkMode.REVERSE_ALPHA_AUG19 -> interpolateAlphaMap(getAlphaMap48(), 48, targetSize)
+            WatermarkMode.REVERSE_ALPHA_MAY20, WatermarkMode.REVERSE_ALPHA_LEGACY -> interpolateAlphaMap(getAlphaMap96(), 96, targetSize)
+            else -> getAlphaMapForSize(targetSize)
+        }
+        for (i in rawMap.indices) {
+            if (abs(rawMap[i]) < 0.015f) {
+                rawMap[i] = 0.0f
+            }
+        }
+        return rawMap
+    }
+
     private class FastAlphaTemplate(
         val size: Int,
         val rowOffsets: IntArray,
@@ -756,12 +771,7 @@ object GeminiWatermarkRemover {
             DetectionMatch(fbX, fbY, fallbackSize, fallbackSize, match?.score ?: 0f, "Fallback_${mode.name}")
         }
 
-        val alphaMap = when (mode) {
-            WatermarkMode.REVERSE_ALPHA_AUG13 -> if (targetMatch.width == 24) getAlphaMap24() else getAlphaMapForSize(targetMatch.width)
-            WatermarkMode.REVERSE_ALPHA_AUG19 -> getAlphaMap48()
-            WatermarkMode.REVERSE_ALPHA_MAY20, WatermarkMode.REVERSE_ALPHA_LEGACY -> getAlphaMap96()
-            else -> getAlphaMapForSize(targetMatch.width)
-        }
+        val alphaMap = getAlphaMapForModeAndSize(mode, targetMatch.width)
         Log.d(TAG, "Selected watermark target: $targetMatch, mode: $mode")
 
         when (mode) {
