@@ -31,11 +31,15 @@ object GeminiWatermarkRemover {
     private const val TAG = "GeminiWatermarkRemover"
 
     enum class WatermarkMode(val displayNameVi: String, val displayNameEn: String) {
-        REVERSE_ALPHA("1. Reverse Alpha (Toán học)", "1. Reverse Alpha (Mathematical)"),
-        IDW_INPAINT("2. IDW Inpaint (Nội suy lấp đầy)", "2. IDW Inpaint (Seamless Sampling)"),
-        OPENCV_INPAINT("3. OpenCV Telea (Inpainting)", "3. OpenCV Telea (Inpainting)"),
-        AI_MODEL("4. AI Denoise Model (FDnCNN AI)", "4. AI Denoise Model (FDnCNN AI)"),
-        ALL_MODES("5. Xuất tất cả các phương án", "5. Export all modes");
+        REVERSE_ALPHA_AUG19("1. Reverse Alpha (19/08/2026 - Nay)", "1. Reverse Alpha (From Aug 19, 2026)"),
+        REVERSE_ALPHA_AUG13("2. Reverse Alpha (13/08 - 18/08/2026)", "2. Reverse Alpha (Aug 13 - 18, 2026)"),
+        REVERSE_ALPHA_V2_36("3. Reverse Alpha V2 (07/06 - 29/07/2026)", "3. Reverse Alpha V2 (Jun 07 - Jul 29, 2026)"),
+        REVERSE_ALPHA_MAY20("4. Reverse Alpha (20/05 - 06/06/2026)", "4. Reverse Alpha (May 20 - Jun 06, 2026)"),
+        REVERSE_ALPHA_LEGACY("5. Reverse Alpha Legacy (Trước 20/05/2026)", "5. Reverse Alpha Legacy (Pre May 20, 2026)"),
+        IDW_INPAINT("6. IDW Inpaint (Nội suy lấp đầy)", "6. IDW Inpaint (Seamless Sampling)"),
+        OPENCV_INPAINT("7. OpenCV Telea (Inpainting)", "7. OpenCV Telea (Inpainting)"),
+        AI_MODEL("8. AI Denoise Model (FDnCNN AI)", "8. AI Denoise Model (FDnCNN AI)"),
+        ALL_MODES("9. Xuất tất cả các phương án", "9. Export all modes");
 
         val displayName: String get() = displayNameVi
         fun getDisplayName(isVi: Boolean): String = if (isVi) displayNameVi else displayNameEn
@@ -76,7 +80,7 @@ object GeminiWatermarkRemover {
 
     private fun getAlphaMap48(): FloatArray {
         cachedAlpha48?.let { return it }
-        val decoded = decodeBase64AlphaMap(EmbeddedAlphaData.ALPHA_48_BASE64, 48 * 48)
+        val decoded = decodeBase64AlphaMap(EmbeddedAlphaData.ALPHA_48_AUG19_BASE64, 48 * 48)
         cachedAlpha48 = decoded
         return decoded
     }
@@ -259,8 +263,8 @@ object GeminiWatermarkRemover {
     }
 
     fun findWatermarkMatch(pixels: IntArray, imageWidth: Int, imageHeight: Int): DetectionMatch? {
-        val searchW = min(imageWidth, 320)
-        val searchH = min(imageHeight, 320)
+        val searchW = min(imageWidth, 380)
+        val searchH = min(imageHeight, 380)
         val startX = imageWidth - searchW
         val startY = imageHeight - searchH
 
@@ -743,21 +747,29 @@ object GeminiWatermarkRemover {
             match
         } else {
             val longSide = max(width, height)
-            val (fallbackSize, fallbackMargin) = if (longSide >= 1600) {
-                Pair(96, 64)
-            } else {
-                Pair(48, 32)
+            val (fallbackSize, fallbackMargin) = when (mode) {
+                WatermarkMode.REVERSE_ALPHA_AUG13 -> Pair(24, 48)
+                else -> if (longSide >= 1600) Pair(96, 192) else Pair(48, 96)
             }
             val fbX = (width - fallbackMargin - fallbackSize).coerceIn(0, width - fallbackSize)
             val fbY = (height - fallbackMargin - fallbackSize).coerceIn(0, height - fallbackSize)
-            DetectionMatch(fbX, fbY, fallbackSize, fallbackSize, match?.score ?: 0f, "Fallback_Standard")
+            DetectionMatch(fbX, fbY, fallbackSize, fallbackSize, match?.score ?: 0f, "Fallback_${mode.name}")
         }
 
-        val alphaMap = getAlphaMapForSize(targetMatch.width)
+        val alphaMap = when (mode) {
+            WatermarkMode.REVERSE_ALPHA_AUG13 -> if (targetMatch.width == 24) getAlphaMap24() else getAlphaMapForSize(targetMatch.width)
+            WatermarkMode.REVERSE_ALPHA_AUG19 -> getAlphaMap48()
+            WatermarkMode.REVERSE_ALPHA_MAY20, WatermarkMode.REVERSE_ALPHA_LEGACY -> getAlphaMap96()
+            else -> getAlphaMapForSize(targetMatch.width)
+        }
         Log.d(TAG, "Selected watermark target: $targetMatch, mode: $mode")
 
         when (mode) {
-            WatermarkMode.REVERSE_ALPHA -> {
+            WatermarkMode.REVERSE_ALPHA_AUG19,
+            WatermarkMode.REVERSE_ALPHA_AUG13,
+            WatermarkMode.REVERSE_ALPHA_V2_36,
+            WatermarkMode.REVERSE_ALPHA_MAY20,
+            WatermarkMode.REVERSE_ALPHA_LEGACY -> {
                 reverseAlphaBlendRegion(pixels, width, alphaMap, targetMatch.x, targetMatch.y, targetMatch.width, targetMatch.height, 1.0f)
             }
             WatermarkMode.IDW_INPAINT -> {

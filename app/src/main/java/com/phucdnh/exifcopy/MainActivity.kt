@@ -22,6 +22,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -86,7 +87,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -360,12 +364,58 @@ fun MainScreen(
     // EXIF Settings and configurations
     var exifSettings by remember { mutableStateOf(ExifSettings()) }
     var removeWatermark by remember { mutableStateOf(true) }
+    var enabledWatermarkModes by remember {
+        val saved = prefs.getStringSet("saved_enabled_watermark_modes", null)
+        if (saved != null && saved.isNotEmpty()) {
+            mutableStateOf(saved.toSet())
+        } else {
+            mutableStateOf(GeminiWatermarkRemover.WatermarkMode.values().map { it.name }.toSet())
+        }
+    }
+    val visibleWatermarkModes = remember(enabledWatermarkModes) {
+        GeminiWatermarkRemover.WatermarkMode.values().filter { enabledWatermarkModes.contains(it.name) }.ifEmpty {
+            listOf(GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA_AUG19)
+        }
+    }
     var watermarkMode by remember {
-        val savedMode = prefs.getString("saved_watermark_mode", GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA.name)
+        val savedMode = prefs.getString("saved_watermark_mode", GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA_AUG19.name)
+        val initialMode = GeminiWatermarkRemover.WatermarkMode.values().find { it.name == savedMode }
+            ?: GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA_AUG19
         mutableStateOf(
-            GeminiWatermarkRemover.WatermarkMode.values().find { it.name == savedMode }
-                ?: GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA
+            if (visibleWatermarkModes.contains(initialMode)) initialMode else visibleWatermarkModes.first()
         )
+    }
+    var autoPrecomputeWatermark by remember {
+        mutableStateOf(prefs.getBoolean("saved_auto_precompute_watermark", true))
+    }
+    var watermarkKeepFileName by remember {
+        mutableStateOf(prefs.getBoolean("saved_watermark_keep_file_name", false))
+    }
+    var watermarkKeepDateTime by remember {
+        mutableStateOf(prefs.getBoolean("saved_watermark_keep_date_time", false))
+    }
+    var watermarkPreviewCache by remember {
+        mutableStateOf<Map<GeminiWatermarkRemover.WatermarkMode, Bitmap>>(emptyMap())
+    }
+    var isPrecomputingPreviews by remember {
+        mutableStateOf(false)
+    }
+
+    val firstTargetUri = targetImages.firstOrNull()?.uri
+    LaunchedEffect(firstTargetUri, autoPrecomputeWatermark) {
+        if (autoPrecomputeWatermark && firstTargetUri != null) {
+            isPrecomputingPreviews = true
+            withContext(Dispatchers.IO) {
+                val previews = WatermarkTimelineHelper.precomputeWatermarkPreviews(context, firstTargetUri)
+                withContext(Dispatchers.Main) {
+                    watermarkPreviewCache = previews ?: emptyMap()
+                    isPrecomputingPreviews = false
+                }
+            }
+        } else {
+            watermarkPreviewCache = emptyMap()
+            isPrecomputingPreviews = false
+        }
     }
     var isProcessing by remember { mutableStateOf(false) }
     var processingMessage by remember { mutableStateOf("") }
@@ -522,33 +572,27 @@ fun MainScreen(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
-            // Tab Row Navigation (4 Tabs)
+            // Tab Row Navigation (3 Tabs - Đã ẩn Upscale & Blend)
             TabRow(
-                selectedTabIndex = activeTab,
+                selectedTabIndex = activeTab.coerceAtMost(2),
                 containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(1.dp)
             ) {
                 Tab(
                     selected = activeTab == 0,
                     onClick = { activeTab = 0 },
-                    text = { Text(Strings.tabCopyExif(isVi), fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    text = { Text(Strings.tabCopyExif(isVi), fontWeight = FontWeight.SemiBold, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     icon = { Icon(Icons.Default.CopyAll, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
                 Tab(
                     selected = activeTab == 1,
                     onClick = { activeTab = 1 },
-                    text = { Text(Strings.tabRemoveAi(isVi), fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    text = { Text(Strings.tabRemoveAi(isVi), fontWeight = FontWeight.SemiBold, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     icon = { Icon(Icons.Default.DeleteForever, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
                 Tab(
                     selected = activeTab == 2,
                     onClick = { activeTab = 2 },
-                    text = { Text(Strings.tabUpscaleBlend(isVi), fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    icon = { Icon(Icons.Default.AutoFixHigh, contentDescription = null, modifier = Modifier.size(18.dp)) }
-                )
-                Tab(
-                    selected = activeTab == 3,
-                    onClick = { activeTab = 3 },
-                    text = { Text(Strings.tabSettings(isVi), fontWeight = FontWeight.SemiBold, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    text = { Text(Strings.tabSettings(isVi), fontWeight = FontWeight.SemiBold, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     icon = { Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp)) }
                 )
             }
@@ -994,39 +1038,19 @@ fun MainScreen(
 
                                     if (removeWatermark) {
                                         Spacer(modifier = Modifier.width(12.dp))
-                                        var expanded by remember { mutableStateOf(false) }
-
-                                        Box(modifier = Modifier.weight(1f, fill = false)) {
-                                            OutlinedButton(
-                                                onClick = { expanded = true },
-                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                                modifier = Modifier.heightIn(min = 34.dp)
-                                            ) {
-                                                Text(
-                                                    text = watermarkMode.getDisplayName(isVi),
-                                                    fontSize = 11.sp,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                Spacer(modifier = Modifier.width(2.dp))
-                                                Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
-                                            }
-                                            DropdownMenu(
-                                                expanded = expanded,
-                                                onDismissRequest = { expanded = false }
-                                            ) {
-                                                GeminiWatermarkRemover.WatermarkMode.values().forEach { mode ->
-                                                    DropdownMenuItem(
-                                                        text = { Text(mode.getDisplayName(isVi), fontSize = 12.sp) },
-                                                        onClick = {
-                                                            watermarkMode = mode
-                                                            prefs.edit().putString("saved_watermark_mode", mode.name).apply()
-                                                            expanded = false
-                                                        }
-                                                    )
-                                                }
-                                            }
-                                        }
+                                        InteractiveWatermarkDropdown(
+                                            selectedMode = watermarkMode,
+                                            visibleModes = visibleWatermarkModes,
+                                            onModeSelected = { newMode ->
+                                                watermarkMode = newMode
+                                                prefs.edit().putString("saved_watermark_mode", newMode.name).apply()
+                                            },
+                                            isVi = isVi,
+                                            autoPrecompute = autoPrecomputeWatermark,
+                                            previewCache = watermarkPreviewCache,
+                                            isComputing = isPrecomputingPreviews,
+                                            modifier = Modifier.weight(1f, fill = false)
+                                        )
                                     }
                                 }
 
@@ -1346,39 +1370,19 @@ fun MainScreen(
 
                                     if (removeWatermark) {
                                         Spacer(modifier = Modifier.width(12.dp))
-                                        var expanded by remember { mutableStateOf(false) }
-
-                                        Box(modifier = Modifier.weight(1f, fill = false)) {
-                                            OutlinedButton(
-                                                onClick = { expanded = true },
-                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                                modifier = Modifier.heightIn(min = 34.dp)
-                                            ) {
-                                                Text(
-                                                    text = watermarkMode.getDisplayName(isVi),
-                                                    fontSize = 11.sp,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                Spacer(modifier = Modifier.width(2.dp))
-                                                Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
-                                            }
-                                            DropdownMenu(
-                                                expanded = expanded,
-                                                onDismissRequest = { expanded = false }
-                                            ) {
-                                                GeminiWatermarkRemover.WatermarkMode.values().forEach { mode ->
-                                                    DropdownMenuItem(
-                                                        text = { Text(mode.getDisplayName(isVi), fontSize = 12.sp) },
-                                                        onClick = {
-                                                            watermarkMode = mode
-                                                            prefs.edit().putString("saved_watermark_mode", mode.name).apply()
-                                                            expanded = false
-                                                        }
-                                                    )
-                                                }
-                                            }
-                                        }
+                                        InteractiveWatermarkDropdown(
+                                            selectedMode = watermarkMode,
+                                            visibleModes = visibleWatermarkModes,
+                                            onModeSelected = { newMode ->
+                                                watermarkMode = newMode
+                                                prefs.edit().putString("saved_watermark_mode", newMode.name).apply()
+                                            },
+                                            isVi = isVi,
+                                            autoPrecompute = autoPrecomputeWatermark,
+                                            previewCache = watermarkPreviewCache,
+                                            isComputing = isPrecomputingPreviews,
+                                            modifier = Modifier.weight(1f, fill = false)
+                                        )
                                     }
                                 }
 
@@ -1410,7 +1414,9 @@ fun MainScreen(
                                                         targetUri = targetItem.uri,
                                                         replaceOriginal = false,
                                                         removeWatermark = removeWatermark,
-                                                        watermarkMode = watermarkMode
+                                                        watermarkMode = watermarkMode,
+                                                        keepOriginalFileName = watermarkKeepFileName,
+                                                        keepOriginalDateTime = watermarkKeepDateTime
                                                     )
                                                     if (outputUris.isNotEmpty()) {
                                                         successCount += outputUris.size
@@ -1444,9 +1450,9 @@ fun MainScreen(
                             }
                         }
                     }
-                    2 -> {
+                    99 -> {
                         // -----------------------------------------------------------------
-                        // TAB 2: GHÉP & PHÓNG TO AI (UPSCALE & BLEND)
+                        // TAB: GHÉP & PHÓNG TO AI (UPSCALE & BLEND - ẨN)
                         // -----------------------------------------------------------------
                         Column(modifier = Modifier.fillMaxSize()) {
                             val tab2ScrollState = rememberScrollState()
@@ -1935,7 +1941,10 @@ fun MainScreen(
                             }
                         }
                     }
-                    3 -> {
+                    2 -> {
+                        // -----------------------------------------------------------------
+                        // TAB 2: CÀI ĐẶT (SETTINGS)
+                        // -----------------------------------------------------------------
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -1953,6 +1962,40 @@ fun MainScreen(
                                 onWatermarkModeChange = { newMode ->
                                     watermarkMode = newMode
                                     prefs.edit().putString("saved_watermark_mode", newMode.name).apply()
+                                },
+                                enabledWatermarkModes = enabledWatermarkModes,
+                                onToggleWatermarkMode = { mode ->
+                                    val current = enabledWatermarkModes.toMutableSet()
+                                    if (current.contains(mode.name)) {
+                                        if (current.size > 1) {
+                                            current.remove(mode.name)
+                                        }
+                                    } else {
+                                        current.add(mode.name)
+                                    }
+                                    enabledWatermarkModes = current
+                                    prefs.edit().putStringSet("saved_enabled_watermark_modes", current).apply()
+                                    if (!current.contains(watermarkMode.name)) {
+                                        val fallback = GeminiWatermarkRemover.WatermarkMode.values().find { current.contains(it.name) }
+                                            ?: GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA_AUG19
+                                        watermarkMode = fallback
+                                        prefs.edit().putString("saved_watermark_mode", fallback.name).apply()
+                                    }
+                                },
+                                autoPrecomputeWatermark = autoPrecomputeWatermark,
+                                onToggleAutoPrecompute = { enabled ->
+                                    autoPrecomputeWatermark = enabled
+                                    prefs.edit().putBoolean("saved_auto_precompute_watermark", enabled).apply()
+                                },
+                                watermarkKeepFileName = watermarkKeepFileName,
+                                onToggleWatermarkKeepFileName = { enabled ->
+                                    watermarkKeepFileName = enabled
+                                    prefs.edit().putBoolean("saved_watermark_keep_file_name", enabled).apply()
+                                },
+                                watermarkKeepDateTime = watermarkKeepDateTime,
+                                onToggleWatermarkKeepDateTime = { enabled ->
+                                    watermarkKeepDateTime = enabled
+                                    prefs.edit().putBoolean("saved_watermark_keep_date_time", enabled).apply()
                                 },
                                 onOpenExifSettings = { showSettingsDialog = true },
                                 isVi = isVi
@@ -2843,14 +2886,267 @@ fun ImagePreviewDialog(
 }
 
 @Composable
+fun InteractiveWatermarkDropdown(
+    selectedMode: GeminiWatermarkRemover.WatermarkMode,
+    visibleModes: List<GeminiWatermarkRemover.WatermarkMode>,
+    onModeSelected: (GeminiWatermarkRemover.WatermarkMode) -> Unit,
+    isVi: Boolean,
+    autoPrecompute: Boolean,
+    previewCache: Map<GeminiWatermarkRemover.WatermarkMode, Bitmap>,
+    isComputing: Boolean,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var activeHoverMode by remember { mutableStateOf<GeminiWatermarkRemover.WatermarkMode?>(null) }
+    var fingerYOffsetPx by remember { mutableStateOf<Float?>(null) }
+    var singleItemHeightPx by remember { mutableStateOf(0) }
+    var itemsHeightPx by remember { mutableStateOf(0) }
+    val density = LocalDensity.current
+
+    val currentHover = activeHoverMode ?: selectedMode
+    val activeIndex = remember(currentHover, visibleModes) {
+        val idx = visibleModes.indexOf(currentHover)
+        if (idx >= 0) idx else 0
+    }
+
+    val previewSizeDp = 116.dp
+    val previewSizePx = with(density) { previewSizeDp.toPx() }
+
+    // Target Y: continuously follows finger in real-time when dragging, or rests near active option
+    val targetYPx = remember(fingerYOffsetPx, activeIndex, singleItemHeightPx, previewSizePx, itemsHeightPx) {
+        val rawY = if (fingerYOffsetPx != null) {
+            fingerYOffsetPx!! - (previewSizePx / 2f)
+        } else {
+            val itemH = if (singleItemHeightPx > 0) singleItemHeightPx.toFloat() else with(density) { 48.dp.toPx() }
+            (itemH * activeIndex) + (itemH / 2f) - (previewSizePx / 2f)
+        }
+        val maxBound = (itemsHeightPx - previewSizePx).coerceAtLeast(0f)
+        rawY.coerceIn(0f, if (maxBound > 0f) maxBound else Float.MAX_VALUE)
+    }
+
+    // Ultra-responsive high-stiffness spring animation tracking finger movement
+    val animatedYPx by animateFloatAsState(
+        targetValue = targetYPx,
+        animationSpec = spring(dampingRatio = 0.88f, stiffness = 850f),
+        label = "FingerFollowPreviewAnimation"
+    )
+
+    Box(modifier = modifier) {
+        OutlinedButton(
+            onClick = {
+                expanded = true
+                activeHoverMode = selectedMode
+                fingerYOffsetPx = null
+            },
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+            modifier = Modifier.heightIn(min = 34.dp)
+        ) {
+            Text(
+                text = selectedMode.getDisplayName(isVi),
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.width(2.dp))
+            Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = {
+                expanded = false
+                activeHoverMode = null
+                fingerYOffsetPx = null
+            },
+            containerColor = androidx.compose.ui.graphics.Color.Transparent,
+            shadowElevation = 0.dp,
+            tonalElevation = 0.dp,
+            border = null,
+            modifier = Modifier.widthIn(
+                min = if (autoPrecompute) 340.dp else 220.dp,
+                max = if (autoPrecompute) 410.dp else 290.dp
+            )
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                // CỘT BÊN TRÁI: Ảnh preview lơ lửng, nền ngoài trong suốt, bo góc nhẹ 8dp, bóng nhẹ 5dp, di chuyển theo ngón tay
+                if (autoPrecompute) {
+                    Box(
+                        modifier = Modifier
+                            .width(previewSizeDp + 8.dp)
+                            .padding(end = 8.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            tonalElevation = 2.dp,
+                            shadowElevation = 5.dp,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .size(previewSizeDp)
+                                .offset(y = with(density) { animatedYPx.toDp() })
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(androidx.compose.ui.graphics.Color.Black),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Crossfade(
+                                    targetState = currentHover,
+                                    animationSpec = tween(140),
+                                    label = "FloatingPreviewCrossfade"
+                                ) { mode ->
+                                    val bmp = previewCache[mode]
+                                    if (bmp != null) {
+                                        Image(
+                                            bitmap = bmp.asImageBitmap(),
+                                            contentDescription = "Live Preview",
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else if (isComputing) {
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.Center,
+                                            modifier = Modifier.padding(4.dp)
+                                        ) {
+                                            CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = Strings.previewComputing(isVi),
+                                                fontSize = 9.sp,
+                                                color = androidx.compose.ui.graphics.Color.LightGray
+                                            )
+                                        }
+                                    } else {
+                                        Text(
+                                            text = Strings.previewNotReady(isVi),
+                                            fontSize = 9.sp,
+                                            color = androidx.compose.ui.graphics.Color.Gray,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                            modifier = Modifier.padding(4.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // CỘT BÊN PHẢI: Danh sách các Option items có nền riêng biệt
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 3.dp,
+                    shadowElevation = 4.dp,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .onSizeChanged { itemsHeightPx = it.height }
+                            .pointerInput(visibleModes) {
+                                awaitEachGesture {
+                                    val down = awaitFirstDown(requireUnconsumed = false)
+                                    fingerYOffsetPx = down.position.y
+                                    val totalItems = visibleModes.size
+                                    if (totalItems > 0 && itemsHeightPx > 0) {
+                                        val itemH = itemsHeightPx.toFloat() / totalItems
+                                        val idx = (down.position.y / itemH).toInt().coerceIn(0, totalItems - 1)
+                                        activeHoverMode = visibleModes[idx]
+                                    }
+
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull() ?: break
+                                        if (!change.pressed) {
+                                            fingerYOffsetPx = null
+                                            break
+                                        }
+                                        fingerYOffsetPx = change.position.y
+                                        val totalItems = visibleModes.size
+                                        if (totalItems > 0 && itemsHeightPx > 0) {
+                                            val itemH = itemsHeightPx.toFloat() / totalItems
+                                            val idx = (change.position.y / itemH).toInt().coerceIn(0, totalItems - 1)
+                                            activeHoverMode = visibleModes[idx]
+                                        }
+                                    }
+                                }
+                            }
+                    ) {
+                        visibleModes.forEachIndexed { index, mode ->
+                            val isSelected = selectedMode == mode
+                            val isHovered = currentHover == mode
+
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        RadioButton(
+                                            selected = isSelected,
+                                            onClick = null,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = mode.getDisplayName(isVi),
+                                            fontSize = 12.sp,
+                                            fontWeight = if (isSelected || isHovered) FontWeight.SemiBold else FontWeight.Normal,
+                                            color = if (isHovered) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    onModeSelected(mode)
+                                    expanded = false
+                                    activeHoverMode = null
+                                    fingerYOffsetPx = null
+                                },
+                                modifier = Modifier
+                                    .onSizeChanged { if (index == 0) singleItemHeightPx = it.height }
+                                    .background(
+                                        if (isHovered) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                                        else androidx.compose.ui.graphics.Color.Transparent
+                                    )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun SettingsTabScreen(
     currentLanguage: String,
     onLanguageChange: (String) -> Unit,
     watermarkMode: GeminiWatermarkRemover.WatermarkMode,
     onWatermarkModeChange: (GeminiWatermarkRemover.WatermarkMode) -> Unit,
+    enabledWatermarkModes: Set<String>,
+    onToggleWatermarkMode: (GeminiWatermarkRemover.WatermarkMode) -> Unit,
+    autoPrecomputeWatermark: Boolean,
+    onToggleAutoPrecompute: (Boolean) -> Unit,
+    watermarkKeepFileName: Boolean,
+    onToggleWatermarkKeepFileName: (Boolean) -> Unit,
+    watermarkKeepDateTime: Boolean,
+    onToggleWatermarkKeepDateTime: (Boolean) -> Unit,
     onOpenExifSettings: () -> Unit,
     isVi: Boolean
 ) {
+    val context = LocalContext.current
+    var previewTimelineItem by remember { mutableStateOf<ReverseAlphaTimelineItem?>(null) }
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -2906,6 +3202,295 @@ fun SettingsTabScreen(
                             fontWeight = if (currentLanguage == lang.code) FontWeight.SemiBold else FontWeight.Normal
                         )
                     }
+                }
+            }
+        }
+
+        // Section: Reverse Alpha Timeline Versions & Black Preview
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Schedule, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = Strings.reverseAlphaVersionsTitle(isVi),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = Strings.reverseAlphaVersionsDesc(isVi),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                WatermarkTimelineHelper.TIMELINE_ITEMS.forEach { item ->
+                    val isEnabled = enabledWatermarkModes.contains(item.watermarkMode.name)
+                    val previewBitmap = remember(item.blackAssetPath) {
+                        WatermarkTimelineHelper.getCroppedWatermarkPreview(context, item.blackAssetPath)
+                    }
+
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Text(
+                                            text = item.getDateRange(isVi),
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                }
+
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Checkbox(
+                                        checked = isEnabled,
+                                        onCheckedChange = { onToggleWatermarkMode(item.watermarkMode) }
+                                    )
+                                    Text(
+                                        text = Strings.showInDropdownCheckbox(isVi),
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Black Background Preview Box
+                                Box(
+                                    modifier = Modifier
+                                        .size(68.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(androidx.compose.ui.graphics.Color.Black)
+                                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                                        .clickable { previewTimelineItem = item },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (previewBitmap != null) {
+                                        Image(
+                                            bitmap = previewBitmap.asImageBitmap(),
+                                            contentDescription = "Watermark Preview",
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        Icon(
+                                            Icons.Default.Image,
+                                            contentDescription = null,
+                                            tint = androidx.compose.ui.graphics.Color.Gray
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(12.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = item.getDescription(isVi),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    OutlinedButton(
+                                        onClick = { previewTimelineItem = item },
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(30.dp)
+                                    ) {
+                                        Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(Strings.previewWatermark(isVi), fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section: Dropdown Visibility Checkboxes
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Checklist, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = Strings.watermarkDropdownVisibilityTitle(isVi),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = Strings.watermarkDropdownVisibilityDesc(isVi),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                GeminiWatermarkRemover.WatermarkMode.values().forEach { mode ->
+                    val isChecked = enabledWatermarkModes.contains(mode.name)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onToggleWatermarkMode(mode) }
+                            .padding(vertical = 4.dp, horizontal = 4.dp)
+                    ) {
+                        Checkbox(
+                            checked = isChecked,
+                            onCheckedChange = { onToggleWatermarkMode(mode) }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = mode.getDisplayName(isVi),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (isChecked) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    }
+                }
+            }
+        }
+
+        // Section: Auto Precompute Watermark Previews Toggle
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = Strings.autoPrecomputeWatermarkTitle(isVi),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Switch(
+                        checked = autoPrecomputeWatermark,
+                        onCheckedChange = onToggleAutoPrecompute
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = Strings.autoPrecomputeWatermarkDesc(isVi),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        // Section: Watermark Output File & DateTime Options
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Tune, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = Strings.watermarkOutputOptionsTitle(isVi),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Toggle 1: Keep Original Filename
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(
+                            text = Strings.keepOriginalFileNameTitle(isVi),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = Strings.keepOriginalFileNameDesc(isVi),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = watermarkKeepFileName,
+                        onCheckedChange = onToggleWatermarkKeepFileName
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Toggle 2: Keep Original Date & Time
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(
+                            text = Strings.keepOriginalDateTimeTitle(isVi),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = Strings.keepOriginalDateTimeDesc(isVi),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = watermarkKeepDateTime,
+                        onCheckedChange = onToggleWatermarkKeepDateTime
+                    )
                 }
             }
         }
@@ -3142,6 +3727,109 @@ fun SettingsTabScreen(
                 )
             }
         }
+    }
+
+    // Preview Watermark Modal Dialog
+    previewTimelineItem?.let { item ->
+        val fullBitmap = remember(item.blackAssetPath) {
+            WatermarkTimelineHelper.loadAssetBitmap(context, item.blackAssetPath)
+        }
+        val croppedPreview = remember(item.blackAssetPath) {
+            WatermarkTimelineHelper.getCroppedWatermarkPreview(context, item.blackAssetPath)
+        }
+        AlertDialog(
+            onDismissRequest = { previewTimelineItem = null },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Visibility, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(Strings.previewWatermarkDialogTitle(isVi), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = item.getDateRange(isVi),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+
+                    Text(
+                        text = item.getDescription(isVi),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    // Zoomed Cropped Watermark Area
+                    Text(
+                        text = if (isVi) "Vùng Watermark (Phóng to góc dưới phải):" else "Watermark Region (Bottom-right zoom):",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(160.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(androidx.compose.ui.graphics.Color.Black)
+                            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (croppedPreview != null) {
+                            Image(
+                                bitmap = croppedPreview.asImageBitmap(),
+                                contentDescription = "Watermark Zoom",
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Text(if (isVi) "Không tải được ảnh" else "Image load failed", color = androidx.compose.ui.graphics.Color.Gray, fontSize = 11.sp)
+                        }
+                    }
+
+                    // Full Black Canvas Sample (Square 1:1)
+                    Text(
+                        text = if (isVi) "Toàn bộ ảnh mẫu nền đen (1024x1024 - Hình vuông):" else "Full Black Canvas Sample (1024x1024 - Square):",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.85f)
+                            .aspectRatio(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(androidx.compose.ui.graphics.Color.Black)
+                            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(8.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (fullBitmap != null) {
+                            Image(
+                                bitmap = fullBitmap.asImageBitmap(),
+                                contentDescription = "Full Sample",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Fit
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { previewTimelineItem = null }) {
+                    Text(Strings.close(isVi))
+                }
+            }
+        )
     }
 }
 
@@ -3598,4 +4286,4 @@ fun VisualBlendLoadingDialog(
             }
         }
     }
-}
+}

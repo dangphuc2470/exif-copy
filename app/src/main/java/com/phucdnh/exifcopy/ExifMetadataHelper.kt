@@ -244,7 +244,7 @@ object ExifMetadataHelper {
         itemIndex: Int = 0,
         replaceOriginal: Boolean = false,
         removeWatermark: Boolean = false,
-        watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA,
+        watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA_AUG19,
         upscaleBlend: Boolean = false
     ): Uri? {
         return copyMetadataList(
@@ -268,7 +268,7 @@ object ExifMetadataHelper {
         itemIndex: Int = 0,
         replaceOriginal: Boolean = false,
         removeWatermark: Boolean = false,
-        watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA,
+        watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA_AUG19,
         upscaleBlend: Boolean = false
     ): List<Uri> {
         val savedUris = mutableListOf<Uri>()
@@ -571,15 +571,16 @@ object ExifMetadataHelper {
             }
             log(context, "Tạo temp file thành công: ${tempFile.absolutePath}")
 
-            val modesToRun = if (removeWatermark && watermarkMode == GeminiWatermarkRemover.WatermarkMode.ALL_MODES) {
+            val modesToRun: List<Pair<GeminiWatermarkRemover.WatermarkMode, String>> = if (removeWatermark && watermarkMode == GeminiWatermarkRemover.WatermarkMode.ALL_MODES) {
                 listOf(
-                    GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA to "_reverse_alpha",
+                    GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA_AUG19 to "_reverse_alpha_19aug",
+                    GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA_AUG13 to "_reverse_alpha_13aug",
                     GeminiWatermarkRemover.WatermarkMode.IDW_INPAINT to "_idw_inpaint",
                     GeminiWatermarkRemover.WatermarkMode.OPENCV_INPAINT to "_opencv_inpaint",
                     GeminiWatermarkRemover.WatermarkMode.AI_MODEL to "_ai_model"
                 )
             } else {
-                listOf(watermarkMode to "")
+                listOf(Pair(watermarkMode, ""))
             }
 
             for ((subMode, suffix) in modesToRun) {
@@ -591,11 +592,12 @@ object ExifMetadataHelper {
                         val decodeOptions = BitmapFactory.Options().apply {
                             inPreferredConfig = Bitmap.Config.ARGB_8888
                             inMutable = true
+                            inPremultiplied = false
                         }
                         val bitmap = BitmapFactory.decodeFile(runTempFile.absolutePath, decodeOptions)
                         if (bitmap != null) {
                             val result = GeminiWatermarkRemover.processImage(bitmap, subMode)
-                            log(context, "Đã xử lý xóa watermark Gemini (${subMode.displayName}, detected=${result.detected}, match=${result.match}).")
+                            log(context, "Đã xử lý xóa watermark Gemini (${subMode.displayNameVi}, detected=${result.detected}, match=${result.match}).")
                             FileOutputStream(runTempFile).use { output ->
                                 val compressFormat = when {
                                     tempExt.equals(".PNG", ignoreCase = true) -> android.graphics.Bitmap.CompressFormat.PNG
@@ -611,6 +613,7 @@ object ExifMetadataHelper {
                                 }
                                 val quality = if (compressFormat == android.graphics.Bitmap.CompressFormat.PNG) 100 else 95
                                 result.bitmap.compress(compressFormat, quality, output)
+                                output.flush()
                             }
                             if (result.bitmap !== bitmap) {
                                 result.bitmap.recycle()
@@ -618,7 +621,7 @@ object ExifMetadataHelper {
                             bitmap.recycle()
                         }
                     } catch (e: Exception) {
-                        log(context, "Lỗi khi xóa watermark Gemini (${subMode.displayName}): ${e.message}")
+                        log(context, "Lỗi khi xóa watermark Gemini (${subMode.displayNameVi}): ${e.message}")
                     }
                 }
 
@@ -629,7 +632,7 @@ object ExifMetadataHelper {
                 }
                 try {
                     targetExif.saveAttributes()
-                    log(context, "Đã ghi attributes vào temp file (${subMode.displayName}).")
+                    log(context, "Đã ghi attributes vào temp file (${subMode.displayNameVi}).")
                 } catch (e: Exception) {
                     log(context, "Lưu EXIF attributes không bắt buộc: ${e.message}")
                 }
@@ -724,14 +727,14 @@ object ExifMetadataHelper {
         targetUri: Uri,
         replaceOriginal: Boolean,
         removeWatermark: Boolean = false,
-        watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA
+        watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA_AUG19
     ): Uri? {
         try {
             log(context, "--- BẮT ĐẦU XÓA NHÃN AI ---")
             log(context, "Target URI: $targetUri")
             log(context, "Replace Original: $replaceOriginal")
             log(context, "Remove Watermark: $removeWatermark")
-            log(context, "Watermark Mode: ${watermarkMode.displayName}")
+            log(context, "Watermark Mode: ${watermarkMode.displayNameVi}")
 
             val targetMimeType = getMimeTypeSafely(context, targetUri)
             val tempExt = when {
@@ -748,15 +751,16 @@ object ExifMetadataHelper {
                 }
             }
 
-            val modesToRun = if (removeWatermark && watermarkMode == GeminiWatermarkRemover.WatermarkMode.ALL_MODES) {
+            val modesToRun: List<Pair<GeminiWatermarkRemover.WatermarkMode, String>> = if (removeWatermark && watermarkMode == GeminiWatermarkRemover.WatermarkMode.ALL_MODES) {
                 listOf(
-                    GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA to "_reverse_alpha",
+                    GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA_AUG19 to "_reverse_alpha_19aug",
+                    GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA_AUG13 to "_reverse_alpha_13aug",
                     GeminiWatermarkRemover.WatermarkMode.IDW_INPAINT to "_idw_inpaint",
                     GeminiWatermarkRemover.WatermarkMode.OPENCV_INPAINT to "_opencv_inpaint",
                     GeminiWatermarkRemover.WatermarkMode.AI_MODEL to "_ai_model"
                 )
             } else {
-                listOf(watermarkMode to "")
+                listOf(Pair(watermarkMode, ""))
             }
 
             var lastSavedUri: Uri? = null
@@ -777,7 +781,7 @@ object ExifMetadataHelper {
                         val bitmap = BitmapFactory.decodeFile(runTempFile.absolutePath, decodeOptions)
                         if (bitmap != null) {
                             val result = GeminiWatermarkRemover.processImage(bitmap, subMode)
-                            log(context, "Đã xử lý xóa watermark Gemini (${subMode.displayName}, detected=${result.detected}, match=${result.match}).")
+                            log(context, "Đã xử lý xóa watermark Gemini (${subMode.displayNameVi}, detected=${result.detected}, match=${result.match}).")
                             val compressed = FileOutputStream(runTempFile).use { output ->
                                 val compressFormat = when {
                                     tempExt.contains("png", ignoreCase = true) -> android.graphics.Bitmap.CompressFormat.PNG
@@ -803,7 +807,7 @@ object ExifMetadataHelper {
                             bitmap.recycle()
                         }
                     } catch (e: Exception) {
-                        log(context, "Lỗi khi xóa watermark Gemini (${subMode.displayName}): ${e.message}")
+                        log(context, "Lỗi khi xóa watermark Gemini (${subMode.displayNameVi}): ${e.message}")
                     }
                 }
 
@@ -838,7 +842,7 @@ object ExifMetadataHelper {
 
                 try {
                     exif.saveAttributes()
-                    log(context, "Đã lưu attributes đã làm sạch vào temp file (${subMode.displayName}).")
+                    log(context, "Đã lưu attributes đã làm sạch vào temp file (${subMode.displayNameVi}).")
                 } catch (e: Exception) {
                     log(context, "Bỏ qua saveAttributes nếu không hỗ trợ EXIF: ${e.message}")
                 }
@@ -867,11 +871,14 @@ object ExifMetadataHelper {
         targetUri: Uri,
         replaceOriginal: Boolean,
         removeWatermark: Boolean = false,
-        watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA
+        watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA_AUG19,
+        keepOriginalFileName: Boolean = false,
+        keepOriginalDateTime: Boolean = false
     ): List<Uri> {
         val savedUris = mutableListOf<Uri>()
         try {
             log(context, "--- BẮT ĐẦU XÓA NHÃN AI (LIST) ---")
+            log(context, "Tùy chọn: KeepFileName=$keepOriginalFileName, KeepDateTime=$keepOriginalDateTime")
             val targetMimeType = getMimeTypeSafely(context, targetUri)
             val tempExt = when {
                 targetMimeType.contains("png", ignoreCase = true) -> ".png"
@@ -887,9 +894,25 @@ object ExifMetadataHelper {
                 }
             }
 
+            // Extract original EXIF date time if keepOriginalDateTime is requested
+            val origExif = if (keepOriginalDateTime) {
+                try {
+                    ExifInterface(tempFile.absolutePath)
+                } catch (e: Exception) { null }
+            } else null
+
+            val origDateTime = origExif?.getAttribute(ExifInterface.TAG_DATETIME)
+            val origDateTimeOrig = origExif?.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
+            val origDateTimeDig = origExif?.getAttribute(ExifInterface.TAG_DATETIME_DIGITIZED)
+            val origSubsecOrig = origExif?.getAttribute(ExifInterface.TAG_SUBSEC_TIME_ORIGINAL)
+            val origOffsetOrig = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                origExif?.getAttribute(ExifInterface.TAG_OFFSET_TIME_ORIGINAL)
+            } else null
+
             val modesToRun = if (removeWatermark && watermarkMode == GeminiWatermarkRemover.WatermarkMode.ALL_MODES) {
                 listOf(
-                    GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA to "_reverse_alpha",
+                    GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA_AUG19 to "_reverse_alpha_19aug",
+                    GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA_AUG13 to "_reverse_alpha_13aug",
                     GeminiWatermarkRemover.WatermarkMode.IDW_INPAINT to "_idw_inpaint",
                     GeminiWatermarkRemover.WatermarkMode.OPENCV_INPAINT to "_opencv_inpaint",
                     GeminiWatermarkRemover.WatermarkMode.AI_MODEL to "_ai_model"
@@ -899,7 +922,11 @@ object ExifMetadataHelper {
             }
 
             val rawFileName = getFileName(context, targetUri) ?: "clean_${System.currentTimeMillis()}"
-            val baseName = "clean_" + getBaseName(rawFileName)
+            val baseName = if (keepOriginalFileName) {
+                getBaseName(rawFileName)
+            } else {
+                "clean_" + getBaseName(rawFileName)
+            }
 
             for ((subMode, suffix) in modesToRun) {
                 val runTempFile = File.createTempFile("exif_clean_run", tempExt, context.cacheDir)
@@ -967,6 +994,17 @@ object ExifMetadataHelper {
                 val comment = exif.getAttribute(ExifInterface.TAG_USER_COMMENT)
                 if (comment != null && (comment.contains("Google", ignoreCase = true) || comment.contains("AI", ignoreCase = true))) {
                     exif.setAttribute(ExifInterface.TAG_USER_COMMENT, null)
+                }
+
+                if (keepOriginalDateTime) {
+                    origDateTime?.let { exif.setAttribute(ExifInterface.TAG_DATETIME, it) }
+                    origDateTimeOrig?.let { exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, it) }
+                    origDateTimeDig?.let { exif.setAttribute(ExifInterface.TAG_DATETIME_DIGITIZED, it) }
+                    origSubsecOrig?.let { exif.setAttribute(ExifInterface.TAG_SUBSEC_TIME_ORIGINAL, it) }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        origOffsetOrig?.let { exif.setAttribute(ExifInterface.TAG_OFFSET_TIME_ORIGINAL, it) }
+                    }
+                    log(context, "Đã bảo lưu ngày giờ chụp gốc vào EXIF: $origDateTimeOrig")
                 }
 
                 try {
