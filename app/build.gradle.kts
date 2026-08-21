@@ -15,8 +15,11 @@ android {
         applicationId = "com.phucdnh.exifcopy"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        val appVersionCode = project.findProperty("versionCode")?.toString()?.toIntOrNull() ?: 1
+        val appVersionName = project.findProperty("versionName")?.toString() ?: "1.0"
+
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
