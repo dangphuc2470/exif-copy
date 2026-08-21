@@ -218,18 +218,29 @@ object WatermarkTimelineHelper {
 
             val w = originalBitmap.width
             val h = originalBitmap.height
-            val matchTarget = if (autoDetectForReverseAlpha || !GeminiWatermarkRemover.isReverseAlphaMode(preferredMode)) {
-                val match = GeminiWatermarkRemover.findWatermarkMatch(originalBitmap)
-                if (match != null && match.score >= 0.08f) match else GeminiWatermarkRemover.getFallbackMatch(w, h, preferredMode)
-            } else {
-                GeminiWatermarkRemover.getFallbackMatch(w, h, preferredMode)
-            }
+            val cropX: Int
+            val cropY: Int
+            val cropW: Int
+            val cropH: Int
+            val detectedMatch: GeminiWatermarkRemover.DetectionMatch?
 
-            val pad = (matchTarget.width * 0.85f).toInt().coerceIn(32, 80)
-            val cropX = (matchTarget.x - pad).coerceIn(0, w - 1)
-            val cropY = (matchTarget.y - pad).coerceIn(0, h - 1)
-            val cropW = (matchTarget.width + pad * 2).coerceAtMost(w - cropX)
-            val cropH = (matchTarget.height + pad * 2).coerceAtMost(h - cropY)
+            if (autoDetectForReverseAlpha || !GeminiWatermarkRemover.isReverseAlphaMode(preferredMode)) {
+                detectedMatch = GeminiWatermarkRemover.findWatermarkMatch(originalBitmap)
+                val target = detectedMatch ?: GeminiWatermarkRemover.getFallbackMatch(w, h, preferredMode)
+                val pad = (target.width * 0.85f).toInt().coerceIn(32, 80)
+                cropX = (target.x - pad).coerceIn(0, w - 1)
+                cropY = (target.y - pad).coerceIn(0, h - 1)
+                cropW = (target.width + pad * 2).coerceAtMost(w - cropX)
+                cropH = (target.height + pad * 2).coerceAtMost(h - cropY)
+            } else {
+                detectedMatch = null
+                val longSide = kotlin.math.max(w, h)
+                val cropSpan = if (longSide >= 1600) 360 else 240
+                cropX = (w - cropSpan).coerceIn(0, w - 1)
+                cropY = (h - cropSpan).coerceIn(0, h - 1)
+                cropW = (w - cropX).coerceAtLeast(60)
+                cropH = (h - cropY).coerceAtLeast(60)
+            }
 
             val baseRoi = Bitmap.createBitmap(cropW, cropH, Bitmap.Config.ARGB_8888)
             val cropPixels = IntArray(cropW * cropH)
@@ -244,12 +255,18 @@ object WatermarkTimelineHelper {
 
             for (mode in modesToCompute) {
                 try {
+                    val modeTarget = if (detectedMatch != null && detectedMatch.score >= 0.08f) {
+                        detectedMatch
+                    } else {
+                        GeminiWatermarkRemover.getFallbackMatch(w, h, mode)
+                    }
+
                     val cropped = GeminiWatermarkRemover.processCroppedRoi(
                         roiBitmap = baseRoi,
                         cropOffsetX = cropX,
                         cropOffsetY = cropY,
                         mode = mode,
-                        targetMatch = matchTarget
+                        targetMatch = modeTarget
                     )
                     resultMap[mode] = cropped
                 } catch (e: Exception) {

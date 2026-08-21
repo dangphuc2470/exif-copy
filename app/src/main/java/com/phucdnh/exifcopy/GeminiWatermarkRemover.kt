@@ -870,10 +870,11 @@ object GeminiWatermarkRemover {
     fun getFallbackMatch(width: Int, height: Int, mode: WatermarkMode): DetectionMatch {
         val longSide = max(width, height)
         val (fallbackSize, fallbackMargin) = when (mode) {
-            WatermarkMode.REVERSE_ALPHA_AUG13 -> Pair(24, 32)
-            WatermarkMode.REVERSE_ALPHA_V2_36 -> Pair(36, 64)
+            WatermarkMode.REVERSE_ALPHA_AUG13 -> if (longSide >= 1600) Pair(24, 64) else Pair(24, 32)
+            WatermarkMode.REVERSE_ALPHA_V2_36 -> if (longSide >= 1600) Pair(36, 128) else Pair(36, 64)
             WatermarkMode.REVERSE_ALPHA_MAY20 -> if (longSide >= 1600) Pair(96, 192) else Pair(48, 96)
-            else -> if (longSide >= 1600) Pair(96, 64) else Pair(48, 32)
+            WatermarkMode.REVERSE_ALPHA_AUG19 -> if (longSide >= 1600) Pair(48, 96) else Pair(48, 32)
+            else -> if (longSide >= 1600) Pair(48, 96) else Pair(48, 32)
         }
         val fbX = (width - fallbackMargin - fallbackSize).coerceIn(0, width - fallbackSize)
         val fbY = (height - fallbackMargin - fallbackSize).coerceIn(0, height - fallbackSize)
