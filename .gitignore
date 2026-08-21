@@ -25,3 +25,13 @@ GeminiWatermarkTool-main/
 gemini-watermark-remover/
 window_dump*.xml
 test_gwr_out.png
+
+# Sensitive keys and Firebase files
+google-services.json
+app/google-services.json
+firebase-debug.log
+service-account*.json
+*.jks
+*.keystore
+.env
+.env.*

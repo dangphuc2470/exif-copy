@@ -1,0 +1,38 @@
+name: Build & Distribute APK to Firebase
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Cho phep bam nut Run workflow thu cong tren GitHub
+
+jobs:
+  build-and-distribute:
+    name: Build APK & Upload to Firebase
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant Execute Permission for Gradle Wrapper
+        run: chmod +x gradlew
+
+      - name: Build Release APK
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Upload to Firebase App Distribution
+        uses: wzieba/Firebase-Distribution-Github-Action@v1
+        with:
+          appId: ${{ secrets.FIREBASE_APP_ID }}
+          serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          groups: testers
+          releaseNotes: "Commit: ${{ github.event.head_commit.message }}"
+          file: app/build/outputs/apk/release/app-release.apk
