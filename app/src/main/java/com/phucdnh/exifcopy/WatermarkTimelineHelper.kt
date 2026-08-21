@@ -224,11 +224,11 @@ object WatermarkTimelineHelper {
                 GeminiWatermarkRemover.getFallbackMatch(w, h, GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA_AUG19)
             }
 
-            val padding = (matchTarget.width * 0.4f).toInt().coerceIn(16, 48)
-            val cropX = (matchTarget.x - padding).coerceIn(0, w - 1)
-            val cropY = (matchTarget.y - padding).coerceIn(0, h - 1)
-            val cropW = (matchTarget.width + padding * 2).coerceAtMost(w - cropX)
-            val cropH = (matchTarget.height + padding * 2).coerceAtMost(h - cropY)
+            val pad = (matchTarget.width * 0.85f).toInt().coerceIn(32, 80)
+            val cropX = (matchTarget.x - pad).coerceIn(0, w - 1)
+            val cropY = (matchTarget.y - pad).coerceIn(0, h - 1)
+            val cropW = (matchTarget.width + pad * 2).coerceAtMost(w - cropX)
+            val cropH = (matchTarget.height + pad * 2).coerceAtMost(h - cropY)
 
             val resultMap = mutableMapOf<GeminiWatermarkRemover.WatermarkMode, Bitmap>()
             val modesToCompute = GeminiWatermarkRemover.WatermarkMode.values().filter { 

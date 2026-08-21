@@ -269,15 +269,15 @@ object GeminiWatermarkRemover {
         return cov / den
     }
 
-    fun findWatermarkMatch(bitmap: Bitmap): DetectionMatch? {
+    fun findWatermarkMatch(bitmap: Bitmap, targetSizes: IntArray? = null): DetectionMatch? {
         val width = bitmap.width
         val height = bitmap.height
         val pixels = IntArray(width * height)
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
-        return findWatermarkMatch(pixels, width, height)
+        return findWatermarkMatch(pixels, width, height, targetSizes)
     }
 
-    fun findWatermarkMatch(pixels: IntArray, imageWidth: Int, imageHeight: Int): DetectionMatch? {
+    fun findWatermarkMatch(pixels: IntArray, imageWidth: Int, imageHeight: Int, targetSizes: IntArray? = null): DetectionMatch? {
         val searchW = min(imageWidth, 380)
         val searchH = min(imageHeight, 380)
         val startX = imageWidth - searchW
@@ -297,12 +297,12 @@ object GeminiWatermarkRemover {
             }
         }
 
-        // Test standard sizes first (48, 96, 64 cover 99% of images)
-        val logoSizesToTest = intArrayOf(48, 96, 64, 32, 36, 40, 56, 72, 80, 24, 112, 128)
+        // Test mode-specific sizes or all standard sizes
+        val logoSizesToTest = targetSizes ?: intArrayOf(48, 96, 64, 32, 36, 40, 56, 72, 80, 24, 112, 128)
         var bestScore = -999.0f
         var bestRx = 0
         var bestRy = 0
-        var bestSize = 48
+        var bestSize = logoSizesToTest.firstOrNull() ?: 48
 
         for (size in logoSizesToTest) {
             if (size >= searchW || size >= searchH) continue
@@ -332,7 +332,7 @@ object GeminiWatermarkRemover {
         }
 
         // Fine-tune with step 1 in [-4..4] around the best coarse candidate
-        if (bestScore > 0.10f) {
+        if (bestScore > 0.08f) {
             val template = getFastTemplateForSize(bestSize)
             var fineBestScore = bestScore
             var fineBestRx = bestRx
@@ -363,7 +363,6 @@ object GeminiWatermarkRemover {
             DetectionMatch(startX + bestRx, startY + bestRy, bestSize, bestSize, bestScore, "Size_${bestSize}")
         } else null
     }
-
     /**
      * Mode 1: Pure mathematical Reverse Alpha Blending using exact alpha gain calibration.
      * C_orig = (C_watermarked - alpha * 255) / (1 - alpha)
@@ -856,7 +855,15 @@ object GeminiWatermarkRemover {
     }
 
     fun findWatermarkTarget(bitmap: Bitmap, mode: WatermarkMode): DetectionMatch {
-        val match = findWatermarkMatch(bitmap)
+        val targetSizes = when (mode) {
+            WatermarkMode.REVERSE_ALPHA_AUG13 -> intArrayOf(24)
+            WatermarkMode.REVERSE_ALPHA_AUG19 -> intArrayOf(48, 96)
+            WatermarkMode.REVERSE_ALPHA_V2_36 -> intArrayOf(36)
+            WatermarkMode.REVERSE_ALPHA_MAY20 -> intArrayOf(96)
+            WatermarkMode.REVERSE_ALPHA_LEGACY -> intArrayOf(96, 48)
+            else -> null
+        }
+        val match = findWatermarkMatch(bitmap, targetSizes)
         return if (match != null && match.score >= 0.08f) {
             match
         } else {
