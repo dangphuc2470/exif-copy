@@ -67,7 +67,8 @@ jobs:
         with:
           appId: ${{ secrets.FIREBASE_APP_ID }}
           serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          groups: testers
+          token: ${{ secrets.FIREBASE_TOKEN }}
+          groups: tester
           releaseNotes: "Version ${{ steps.version.outputs.version_name }} (Build #${{ github.run_number }}): ${{ github.event.head_commit.message }}"
           file: app/build/outputs/apk/release/app-release.apk
 
