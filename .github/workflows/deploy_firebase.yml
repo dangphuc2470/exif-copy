@@ -1,14 +1,19 @@
-name: Build & Distribute APK to Firebase
+name: Build & Distribute APK to Firebase and GitHub Releases
 
 on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
   workflow_dispatch: # Cho phep bam nut Run workflow thu cong tren GitHub
+
+permissions:
+  contents: write
 
 jobs:
   build-and-distribute:
-    name: Build APK & Upload to Firebase
+    name: Build APK & Upload to Firebase and GitHub
     runs-on: ubuntu-latest
 
     steps:
@@ -36,3 +41,21 @@ jobs:
           groups: testers
           releaseNotes: "Commit: ${{ github.event.head_commit.message }}"
           file: app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload APK to GitHub Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "Latest Release (Build #${{ github.run_number }})"
+          body: |
+            Automated build from commit ${{ github.sha }}:
+            ${{ github.event.head_commit.message }}
+          files: app/build/outputs/apk/release/app-release.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
