@@ -4,16 +4,24 @@ param (
     [switch]$SkipCI
 )
 
-# Function to get latest tag
-$latestTag = git describe --tags --abbrev=0 2>$null
+# Get latest tag and latest commit message
+$latestTag = (git describe --tags --abbrev=0 2>$null)
 if (-not $latestTag) {
     $latestTag = "1.0.0"
+}
+
+$latestCommitMsg = (git log -1 --pretty=%s 2>$null)
+if (-not $latestCommitMsg) {
+    $latestCommitMsg = "Update project"
+} else {
+    $latestCommitMsg = $latestCommitMsg.Trim()
 }
 
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host " ExifCopy - Release & Push Helper Script" -ForegroundColor Cyan
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "Latest Git Tag: $latestTag" -ForegroundColor Yellow
+Write-Host "Latest Commit : $latestCommitMsg" -ForegroundColor Gray
 
 # Check uncommitted changes
 $status = git status --porcelain
@@ -22,11 +30,12 @@ if ($status) {
     git status -s
     
     if (-not $Message) {
-        $Message = Read-Host "`nEnter commit message"
-    }
-    
-    if (-not $Message) {
-        $Message = "Update project"
+        $inputMsg = Read-Host "`nEnter commit message (Press Enter to use: '$latestCommitMsg')"
+        if (-not [string]::IsNullOrWhiteSpace($inputMsg)) {
+            $Message = $inputMsg.Trim()
+        } else {
+            $Message = $latestCommitMsg
+        }
     }
 
     if ($SkipCI) {
