@@ -23,6 +23,15 @@ Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "Latest Git Tag: $latestTag" -ForegroundColor Yellow
 Write-Host "Latest Commit : $latestCommitMsg" -ForegroundColor Gray
 
+# Handle Version Tag Prompt First
+if (-not $Tag -and -not $SkipCI) {
+    $Tag = Read-Host "`nEnter version tag to release (e.g. v1.2.0, or press Enter for normal push)"
+}
+
+if ($Tag -and -not $Tag.StartsWith("v")) {
+    $Tag = "v$Tag"
+}
+
 # Check uncommitted changes
 $status = git status --porcelain
 if ($status) {
@@ -38,9 +47,12 @@ if ($status) {
         }
     }
 
-    if ($SkipCI) {
-        $Message = "$Message [skip ci]"
-        Write-Host "Appending [skip ci] to commit message..." -ForegroundColor Magenta
+    # If releasing an official tag, skip CI on the main branch commit so only the official tag builds
+    if ($Tag -or $SkipCI) {
+        if (-not $Message.Contains("[skip ci]")) {
+            $Message = "$Message [skip ci]"
+        }
+        Write-Host "Appending [skip ci] to branch commit (official tag build will run)..." -ForegroundColor Magenta
     }
 
     git add .
@@ -51,28 +63,19 @@ if ($status) {
     Write-Host "`nNo changes to commit." -ForegroundColor Gray
 }
 
-# If user just wanted to push with [skip ci], exit here
-if ($SkipCI) {
+# If user just wanted to push with [skip ci] and no tag, exit here
+if ($SkipCI -and -not $Tag) {
     exit 0
 }
 
-# Handle Official Tag Release
-if (-not $Tag) {
-    $Tag = Read-Host "`nEnter version tag to release (or press Enter to skip tag, e.g. v1.1.0)"
-}
-
+# Push official tag release
 if ($Tag) {
-    # Ensure tag starts with 'v'
-    if (-not $Tag.StartsWith("v")) {
-        $Tag = "v$Tag"
-    }
-
     Write-Host "`nCreating tag $Tag and pushing to GitHub..." -ForegroundColor Cyan
-    git tag $Tag
-    git push origin $Tag
+    git tag -f $Tag
+    git push origin $Tag --force
 
     Write-Host "`nOfficial release $Tag triggered successfully on GitHub Actions!" -ForegroundColor Green
     Write-Host "Check progress at: https://github.com/dangphuc2470/exif-copy/actions" -ForegroundColor Cyan
 } else {
-    Write-Host "`nNo tag created. Normal push completed." -ForegroundColor Gray
+    Write-Host "`nNormal push completed. Preview build triggered on GitHub Actions." -ForegroundColor Gray
 }
