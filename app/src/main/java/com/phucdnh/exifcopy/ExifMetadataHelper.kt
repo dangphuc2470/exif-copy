@@ -236,6 +236,50 @@ object ExifMetadataHelper {
     )
 
 
+    fun applyWatermarkRemovalToFile(
+        file: File,
+        mode: GeminiWatermarkRemover.WatermarkMode,
+        context: Context
+    ): Boolean {
+        return try {
+            val decodeOptions = BitmapFactory.Options().apply {
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+                inMutable = true
+                inPremultiplied = false
+            }
+            val bitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOptions) ?: return false
+            val result = GeminiWatermarkRemover.processImage(bitmap, mode)
+            log(context, "Đã xử lý xóa watermark Gemini (${mode.displayName}, detected=${result.detected}, match=${result.match}).")
+
+            val fileExt = file.extension
+            val compressFormat = when {
+                fileExt.equals("png", ignoreCase = true) -> Bitmap.CompressFormat.PNG
+                fileExt.equals("webp", ignoreCase = true) -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        Bitmap.CompressFormat.WEBP_LOSSLESS
+                    } else {
+                        @Suppress("DEPRECATION")
+                        Bitmap.CompressFormat.WEBP
+                    }
+                }
+                else -> Bitmap.CompressFormat.JPEG
+            }
+            val quality = if (compressFormat == Bitmap.CompressFormat.PNG) 100 else 95
+            FileOutputStream(file).use { output ->
+                result.bitmap.compress(compressFormat, quality, output)
+                output.flush()
+            }
+            if (result.bitmap !== bitmap) {
+                result.bitmap.recycle()
+            }
+            bitmap.recycle()
+            true
+        } catch (e: Exception) {
+            log(context, "Lỗi khi xóa watermark Gemini (${mode.displayName}): ${e.message}")
+            false
+        }
+    }
+
     fun copyMetadata(
         context: Context,
         sourceUri: Uri,
@@ -588,41 +632,7 @@ object ExifMetadataHelper {
                 tempFile.copyTo(runTempFile, overwrite = true)
 
                 if (removeWatermark) {
-                    try {
-                        val decodeOptions = BitmapFactory.Options().apply {
-                            inPreferredConfig = Bitmap.Config.ARGB_8888
-                            inMutable = true
-                            inPremultiplied = false
-                        }
-                        val bitmap = BitmapFactory.decodeFile(runTempFile.absolutePath, decodeOptions)
-                        if (bitmap != null) {
-                            val result = GeminiWatermarkRemover.processImage(bitmap, subMode)
-                            log(context, "Đã xử lý xóa watermark Gemini (${subMode.displayNameVi}, detected=${result.detected}, match=${result.match}).")
-                            FileOutputStream(runTempFile).use { output ->
-                                val compressFormat = when {
-                                    tempExt.equals(".PNG", ignoreCase = true) -> android.graphics.Bitmap.CompressFormat.PNG
-                                    tempExt.equals(".WEBP", ignoreCase = true) -> {
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                                            android.graphics.Bitmap.CompressFormat.WEBP_LOSSLESS
-                                        } else {
-                                            @Suppress("DEPRECATION")
-                                            android.graphics.Bitmap.CompressFormat.WEBP
-                                        }
-                                    }
-                                    else -> android.graphics.Bitmap.CompressFormat.JPEG
-                                }
-                                val quality = if (compressFormat == android.graphics.Bitmap.CompressFormat.PNG) 100 else 95
-                                result.bitmap.compress(compressFormat, quality, output)
-                                output.flush()
-                            }
-                            if (result.bitmap !== bitmap) {
-                                result.bitmap.recycle()
-                            }
-                            bitmap.recycle()
-                        }
-                    } catch (e: Exception) {
-                        log(context, "Lỗi khi xóa watermark Gemini (${subMode.displayNameVi}): ${e.message}")
-                    }
+                    applyWatermarkRemovalToFile(runTempFile, subMode, context)
                 }
 
                 // Write properties to the temp file
@@ -772,43 +782,7 @@ object ExifMetadataHelper {
                 tempFile.copyTo(runTempFile, overwrite = true)
 
                 if (removeWatermark) {
-                    try {
-                        val decodeOptions = BitmapFactory.Options().apply {
-                            inPreferredConfig = Bitmap.Config.ARGB_8888
-                            inMutable = true
-                            inPremultiplied = false
-                        }
-                        val bitmap = BitmapFactory.decodeFile(runTempFile.absolutePath, decodeOptions)
-                        if (bitmap != null) {
-                            val result = GeminiWatermarkRemover.processImage(bitmap, subMode)
-                            log(context, "Đã xử lý xóa watermark Gemini (${subMode.displayNameVi}, detected=${result.detected}, match=${result.match}).")
-                            val compressed = FileOutputStream(runTempFile).use { output ->
-                                val compressFormat = when {
-                                    tempExt.contains("png", ignoreCase = true) -> android.graphics.Bitmap.CompressFormat.PNG
-                                    tempExt.contains("webp", ignoreCase = true) -> {
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                                            android.graphics.Bitmap.CompressFormat.WEBP_LOSSLESS
-                                        } else {
-                                            @Suppress("DEPRECATION")
-                                            android.graphics.Bitmap.CompressFormat.WEBP
-                                        }
-                                    }
-                                    else -> android.graphics.Bitmap.CompressFormat.JPEG
-                                }
-                                val quality = if (compressFormat == android.graphics.Bitmap.CompressFormat.PNG) 100 else 95
-                                val res = result.bitmap.compress(compressFormat, quality, output)
-                                output.flush()
-                                res
-                            }
-                            log(context, "Compress result: $compressed, runTempFile size: ${runTempFile.length()}")
-                            if (result.bitmap !== bitmap) {
-                                result.bitmap.recycle()
-                            }
-                            bitmap.recycle()
-                        }
-                    } catch (e: Exception) {
-                        log(context, "Lỗi khi xóa watermark Gemini (${subMode.displayNameVi}): ${e.message}")
-                    }
+                    applyWatermarkRemovalToFile(runTempFile, subMode, context)
                 }
 
                 val exif = ExifInterface(runTempFile.absolutePath)
@@ -933,41 +907,7 @@ object ExifMetadataHelper {
                 tempFile.copyTo(runTempFile, overwrite = true)
 
                 if (removeWatermark) {
-                    try {
-                        val decodeOptions = BitmapFactory.Options().apply {
-                            inPreferredConfig = Bitmap.Config.ARGB_8888
-                            inMutable = true
-                            inPremultiplied = false
-                        }
-                        val bitmap = BitmapFactory.decodeFile(runTempFile.absolutePath, decodeOptions)
-                        if (bitmap != null) {
-                            val result = GeminiWatermarkRemover.processImage(bitmap, subMode)
-                            log(context, "Đã xử lý xóa watermark Gemini (${subMode.displayName}, detected=${result.detected}, match=${result.match}).")
-                            FileOutputStream(runTempFile).use { output ->
-                                val compressFormat = when {
-                                    tempExt.contains("png", ignoreCase = true) -> android.graphics.Bitmap.CompressFormat.PNG
-                                    tempExt.contains("webp", ignoreCase = true) -> {
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                                            android.graphics.Bitmap.CompressFormat.WEBP_LOSSLESS
-                                        } else {
-                                            @Suppress("DEPRECATION")
-                                            android.graphics.Bitmap.CompressFormat.WEBP
-                                        }
-                                    }
-                                    else -> android.graphics.Bitmap.CompressFormat.JPEG
-                                }
-                                val quality = if (compressFormat == android.graphics.Bitmap.CompressFormat.PNG) 100 else 95
-                                result.bitmap.compress(compressFormat, quality, output)
-                                output.flush()
-                            }
-                            if (result.bitmap !== bitmap) {
-                                result.bitmap.recycle()
-                            }
-                            bitmap.recycle()
-                        }
-                    } catch (e: Exception) {
-                        log(context, "Lỗi khi xóa watermark Gemini (${subMode.displayName}): ${e.message}")
-                    }
+                    applyWatermarkRemovalToFile(runTempFile, subMode, context)
                 }
 
                 val exif = ExifInterface(runTempFile.absolutePath)

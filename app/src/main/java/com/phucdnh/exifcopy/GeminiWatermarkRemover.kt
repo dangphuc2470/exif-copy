@@ -422,11 +422,29 @@ object GeminiWatermarkRemover {
     ) {
         val copy = pixels.copyOf()
         val imageHeight = pixels.size / imageWidth
-        val radius = max(width / 2 + 8, 24)
+        val radius = max(width / 2 + 12, 28)
         val THRESHOLD = 0.005f
 
-        // First pass: Apply mathematical reverse alpha to preserve underlying color gradient
-        reverseAlphaBlendRegion(pixels, imageWidth, alphaMap, x, y, width, height, alphaGain * 0.85f)
+        // Collect boundary clean pixels for robust fallback if corner sample density is low
+        val boundarySamples = mutableListOf<Triple<Int, Int, Int>>()
+        val pad = 12
+        val bStartX = (x - pad).coerceAtLeast(0)
+        val bStartY = (y - pad).coerceAtLeast(0)
+        val bEndX = (x + width + pad).coerceAtMost(imageWidth - 1)
+        val bEndY = (y + height + pad).coerceAtMost(imageHeight - 1)
+
+        for (py in bStartY..bEndY step 2) {
+            for (px in bStartX..bEndX step 2) {
+                val nRow = py - y
+                val nCol = px - x
+                val nAlpha = if (nRow in 0 until height && nCol in 0 until width) {
+                    abs(alphaMap[nRow * width + nCol]) * alphaGain
+                } else 0f
+                if (nAlpha < THRESHOLD) {
+                    boundarySamples.add(Triple(px, py, copy[py * imageWidth + px]))
+                }
+            }
+        }
 
         for (row in 0 until height) {
             for (col in 0 until width) {
@@ -458,8 +476,8 @@ object GeminiWatermarkRemover {
                                 val nG = (nP shr 8) and 0xFF
                                 val nB = nP and 0xFF
 
-                                val distSq = (dx * dx + dy * dy).toFloat().coerceAtLeast(1.0f)
-                                val wGt = 1.0f / (distSq * distSq) // Fourth power inverse distance for local smoothness
+                                val dist = kotlin.math.sqrt((dx * dx + dy * dy).toFloat()).coerceAtLeast(1.0f)
+                                val wGt = 1.0f / (dist * dist)
 
                                 sumR += nR * wGt
                                 sumG += nG * wGt
@@ -470,9 +488,23 @@ object GeminiWatermarkRemover {
                     }
                 }
 
+                // Fallback to boundary samples if local window has insufficient non-watermark pixels
+                if (totalWeight <= 0f && boundarySamples.isNotEmpty()) {
+                    for ((bx, by, bP) in boundarySamples) {
+                        val dx = (bx - px).toFloat()
+                        val dy = (by - py).toFloat()
+                        val dist = kotlin.math.sqrt((dx * dx + dy * dy)).coerceAtLeast(1.0f)
+                        val wGt = 1.0f / (dist * dist)
+                        sumR += ((bP shr 16) and 0xFF) * wGt
+                        sumG += ((bP shr 8) and 0xFF) * wGt
+                        sumB += (bP and 0xFF) * wGt
+                        totalWeight += wGt
+                    }
+                }
+
                 if (totalWeight > 0f) {
                     val pIdx = py * imageWidth + px
-                    val curP = pixels[pIdx]
+                    val curP = copy[pIdx]
                     val curA = (curP shr 24) and 0xFF
                     val curR = (curP shr 16) and 0xFF
                     val curG = (curP shr 8) and 0xFF
@@ -482,9 +514,9 @@ object GeminiWatermarkRemover {
                     val idwG = (sumG / totalWeight).coerceIn(0f, 255f)
                     val idwB = (sumB / totalWeight).coerceIn(0f, 255f)
 
-                    // Smoothstep feather blending so edges dissolve naturally into surroundings without sharp cutoffs
-                    val t = (alphaMagnitude / 0.30f).coerceIn(0f, 1f)
-                    val sBlend = t * t * (3f - 2f * t)
+                    // Smooth edge blending: inner watermark (alpha >= 0.05) is 100% inpaint, outer perimeter feather dissolves smoothly
+                    val blend = (alphaMagnitude / 0.05f).coerceIn(0f, 1f)
+                    val sBlend = blend * blend * (3f - 2f * blend)
 
                     val outR = (curR * (1f - sBlend) + idwR * sBlend).roundToInt().coerceIn(0, 255)
                     val outG = (curG * (1f - sBlend) + idwG * sBlend).roundToInt().coerceIn(0, 255)
@@ -810,27 +842,36 @@ object GeminiWatermarkRemover {
         return scale
     }
 
+    fun getFallbackMatch(width: Int, height: Int, mode: WatermarkMode): DetectionMatch {
+        val longSide = max(width, height)
+        val (fallbackSize, fallbackMargin) = when (mode) {
+            WatermarkMode.REVERSE_ALPHA_AUG13 -> Pair(24, 32)
+            WatermarkMode.REVERSE_ALPHA_V2_36 -> Pair(36, 64)
+            WatermarkMode.REVERSE_ALPHA_MAY20 -> if (longSide >= 1600) Pair(96, 192) else Pair(48, 96)
+            else -> if (longSide >= 1600) Pair(96, 64) else Pair(48, 32)
+        }
+        val fbX = (width - fallbackMargin - fallbackSize).coerceIn(0, width - fallbackSize)
+        val fbY = (height - fallbackMargin - fallbackSize).coerceIn(0, height - fallbackSize)
+        return DetectionMatch(fbX, fbY, fallbackSize, fallbackSize, 0f, "Fallback_${mode.name}")
+    }
+
+    fun findWatermarkTarget(bitmap: Bitmap, mode: WatermarkMode): DetectionMatch {
+        val match = findWatermarkMatch(bitmap)
+        return if (match != null && match.score >= 0.08f) {
+            match
+        } else {
+            getFallbackMatch(bitmap.width, bitmap.height, mode)
+        }
+    }
+
     fun processImage(bitmap: Bitmap, mode: WatermarkMode = WatermarkMode.AI_MODEL): RemovalResult {
         val width = bitmap.width
         val height = bitmap.height
 
-        val match = findWatermarkMatch(bitmap)
+        val targetMatch = findWatermarkTarget(bitmap, mode)
 
         val pixels = IntArray(width * height)
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
-
-        val targetMatch = if (match != null && match.score >= 0.15f) {
-            match
-        } else {
-            val longSide = max(width, height)
-            val (fallbackSize, fallbackMargin) = when (mode) {
-                WatermarkMode.REVERSE_ALPHA_AUG13 -> Pair(24, 48)
-                else -> if (longSide >= 1600) Pair(96, 192) else Pair(48, 96)
-            }
-            val fbX = (width - fallbackMargin - fallbackSize).coerceIn(0, width - fallbackSize)
-            val fbY = (height - fallbackMargin - fallbackSize).coerceIn(0, height - fallbackSize)
-            DetectionMatch(fbX, fbY, fallbackSize, fallbackSize, match?.score ?: 0f, "Fallback_${mode.name}")
-        }
 
         val alphaMap = getAlphaMapForModeAndSize(mode, targetMatch.width)
         Log.d(TAG, "Selected watermark target: $targetMatch, mode: $mode")
@@ -858,7 +899,7 @@ object GeminiWatermarkRemover {
         outputBitmap.isPremultiplied = false
         outputBitmap.setPixels(pixels, 0, width, 0, 0, width, height)
 
-        return RemovalResult(outputBitmap, detected = (match != null && match.score >= 0.08f), match = targetMatch)
+        return RemovalResult(outputBitmap, detected = (targetMatch.score >= 0.08f), match = targetMatch)
     }
 
     fun processAndSave(context: Context, sourceUri: Uri, mode: WatermarkMode = WatermarkMode.AI_MODEL): Uri? {

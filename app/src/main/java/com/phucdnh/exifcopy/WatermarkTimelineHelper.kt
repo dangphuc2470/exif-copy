@@ -218,20 +218,10 @@ object WatermarkTimelineHelper {
             val h = originalBitmap.height
             val match = GeminiWatermarkRemover.findWatermarkMatch(originalBitmap)
 
-            val matchTarget = if (match != null && match.score >= 0.15f) {
+            val matchTarget = if (match != null && match.score >= 0.08f) {
                 match
             } else {
-                val longSide = kotlin.math.max(w, h)
-                val fallbackSize = if (longSide >= 1600) 96 else 48
-                val fallbackMargin = if (longSide >= 1600) 64 else 32
-                GeminiWatermarkRemover.DetectionMatch(
-                    (w - fallbackMargin - fallbackSize).coerceIn(0, w - fallbackSize),
-                    (h - fallbackMargin - fallbackSize).coerceIn(0, h - fallbackSize),
-                    fallbackSize,
-                    fallbackSize,
-                    match?.score ?: 0f,
-                    "Fallback"
-                )
+                GeminiWatermarkRemover.getFallbackMatch(w, h, GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA_AUG19)
             }
 
             val padding = (matchTarget.width * 0.4f).toInt().coerceIn(16, 48)

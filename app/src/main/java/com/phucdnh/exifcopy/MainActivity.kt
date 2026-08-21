@@ -401,12 +401,16 @@ fun MainScreen(
         mutableStateOf(false)
     }
 
-    val firstTargetUri = targetImages.firstOrNull()?.uri
-    LaunchedEffect(firstTargetUri, autoPrecomputeWatermark) {
-        if (autoPrecomputeWatermark && firstTargetUri != null) {
+    val currentTargetItem = targetImages.firstOrNull()
+    val currentTargetId = currentTargetItem?.id
+    val currentTargetUri = currentTargetItem?.uri
+
+    LaunchedEffect(currentTargetId, autoPrecomputeWatermark) {
+        if (autoPrecomputeWatermark && currentTargetUri != null) {
             isPrecomputingPreviews = true
+            watermarkPreviewCache = emptyMap()
             withContext(Dispatchers.IO) {
-                val previews = WatermarkTimelineHelper.precomputeWatermarkPreviews(context, firstTargetUri)
+                val previews = WatermarkTimelineHelper.precomputeWatermarkPreviews(context, currentTargetUri)
                 withContext(Dispatchers.Main) {
                     watermarkPreviewCache = previews ?: emptyMap()
                     isPrecomputingPreviews = false
