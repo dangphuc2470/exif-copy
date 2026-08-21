@@ -110,6 +110,8 @@ object Strings {
     fun keepOriginalFileNameDesc(isVi: Boolean) = if (isVi) "Lưu ảnh với đúng tên file gốc ban đầu thay vì thêm tiền tố clean_ (mặc định tắt)" else "Save image with original filename without clean_ prefix (default off)"
     fun keepOriginalDateTimeTitle(isVi: Boolean) = if (isVi) "Giữ nguyên ngày giờ chụp gốc (Keep date & time)" else "Keep original date & time"
     fun keepOriginalDateTimeDesc(isVi: Boolean) = if (isVi) "Bảo lưu chính xác thời gian chụp và ngày tạo EXIF ban đầu của ảnh (mặc định tắt)" else "Preserve exact original capture time and EXIF creation date (default off)"
+    fun reverseAlphaAutoDetectTitle(isVi: Boolean) = if (isVi) "Tự động nhận diện vị trí cho Reverse Alpha" else "Auto-detect position for Reverse Alpha"
+    fun reverseAlphaAutoDetectDesc(isVi: Boolean) = if (isVi) "Mặc định TẮT để Reverse Alpha áp dụng tọa độ chuẩn của Google Gemini siêu tốc tức thì (0ms). Bật nếu ảnh đã bị crop/lệch lề." else "Default OFF for instantaneous (0ms) mathematical removal using Google Gemini standard coordinates. Turn ON if your image has been cropped or re-aligned."
     fun previewSlideTip(isVi: Boolean) = if (isVi) "Nhấn giữ và trượt ngón tay để so sánh trực tiếp" else "Press and slide finger to compare modes live"
     fun previewComputing(isVi: Boolean) = if (isVi) "Đang tính toán preview..." else "Computing preview..."
     fun previewNotReady(isVi: Boolean) = if (isVi) "Chưa có ảnh preview" else "Preview not available"

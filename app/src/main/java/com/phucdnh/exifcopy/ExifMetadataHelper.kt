@@ -50,7 +50,8 @@ data class ExifSettings(
     val copyCreatedDate: Boolean = true,
     val copyFileName: Boolean = true, // Default to true: auto copy source filename
     val copyXmpInfo: Boolean = true,
-    val outputFormat: String = "JPG" // "ORIGINAL", "JPG", "JPEG", "PNG", "WEBP_LOSSY", "WEBP_LOSSLESS"
+    val outputFormat: String = "JPG", // "ORIGINAL", "JPG", "JPEG", "PNG", "WEBP_LOSSY", "WEBP_LOSSLESS"
+    val reverseAlphaAutoDetect: Boolean = false
 )
 
 object ExifMetadataHelper {
@@ -239,7 +240,8 @@ object ExifMetadataHelper {
     fun applyWatermarkRemovalToFile(
         file: File,
         mode: GeminiWatermarkRemover.WatermarkMode,
-        context: Context
+        context: Context,
+        autoDetectForReverseAlpha: Boolean = false
     ): Boolean {
         return try {
             val decodeOptions = BitmapFactory.Options().apply {
@@ -248,7 +250,7 @@ object ExifMetadataHelper {
                 inPremultiplied = false
             }
             val bitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOptions) ?: return false
-            val result = GeminiWatermarkRemover.processImage(bitmap, mode)
+            val result = GeminiWatermarkRemover.processImage(bitmap, mode, autoDetectForReverseAlpha)
             log(context, "Đã xử lý xóa watermark Gemini (${mode.displayName}, detected=${result.detected}, match=${result.match}).")
 
             val fileExt = file.extension
@@ -632,7 +634,8 @@ object ExifMetadataHelper {
                 tempFile.copyTo(runTempFile, overwrite = true)
 
                 if (removeWatermark) {
-                    applyWatermarkRemovalToFile(runTempFile, subMode, context)
+                    val autoDetect = settings?.reverseAlphaAutoDetect ?: false
+                    applyWatermarkRemovalToFile(runTempFile, subMode, context, autoDetect)
                 }
 
                 // Write properties to the temp file
@@ -847,12 +850,13 @@ object ExifMetadataHelper {
         removeWatermark: Boolean = false,
         watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA_AUG19,
         keepOriginalFileName: Boolean = false,
-        keepOriginalDateTime: Boolean = false
+        keepOriginalDateTime: Boolean = false,
+        autoDetectForReverseAlpha: Boolean = false
     ): List<Uri> {
         val savedUris = mutableListOf<Uri>()
         try {
             log(context, "--- BẮT ĐẦU XÓA NHÃN AI (LIST) ---")
-            log(context, "Tùy chọn: KeepFileName=$keepOriginalFileName, KeepDateTime=$keepOriginalDateTime")
+            log(context, "Tùy chọn: KeepFileName=$keepOriginalFileName, KeepDateTime=$keepOriginalDateTime, AutoDetectRA=$autoDetectForReverseAlpha")
             val targetMimeType = getMimeTypeSafely(context, targetUri)
             val tempExt = when {
                 targetMimeType.contains("png", ignoreCase = true) -> ".png"
@@ -907,7 +911,7 @@ object ExifMetadataHelper {
                 tempFile.copyTo(runTempFile, overwrite = true)
 
                 if (removeWatermark) {
-                    applyWatermarkRemovalToFile(runTempFile, subMode, context)
+                    applyWatermarkRemovalToFile(runTempFile, subMode, context, autoDetectForReverseAlpha)
                 }
 
                 val exif = ExifInterface(runTempFile.absolutePath)

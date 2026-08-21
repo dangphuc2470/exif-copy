@@ -272,9 +272,24 @@ object GeminiWatermarkRemover {
     fun findWatermarkMatch(bitmap: Bitmap, targetSizes: IntArray? = null): DetectionMatch? {
         val width = bitmap.width
         val height = bitmap.height
-        val pixels = IntArray(width * height)
-        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
-        return findWatermarkMatch(pixels, width, height, targetSizes)
+        val searchW = min(width, 380)
+        val searchH = min(height, 380)
+        val startX = width - searchW
+        val startY = height - searchH
+
+        val roiPixels = IntArray(searchW * searchH)
+        bitmap.getPixels(roiPixels, 0, searchW, startX, startY, searchW, searchH)
+
+        val roiGray = FloatArray(searchW * searchH)
+        for (i in 0 until searchW * searchH) {
+            val pixel = roiPixels[i]
+            val r = (pixel shr 16) and 0xFF
+            val g = (pixel shr 8) and 0xFF
+            val b = pixel and 0xFF
+            roiGray[i] = (0.2126f * r + 0.7152f * g + 0.0722f * b) / 255f
+        }
+
+        return findWatermarkMatchInRoi(roiGray, searchW, searchH, startX, startY, targetSizes)
     }
 
     fun findWatermarkMatch(pixels: IntArray, imageWidth: Int, imageHeight: Int, targetSizes: IntArray? = null): DetectionMatch? {
@@ -283,7 +298,6 @@ object GeminiWatermarkRemover {
         val startX = imageWidth - searchW
         val startY = imageHeight - searchH
 
-        // Extract ONLY search window to grayscale (avoid allocating 48MB for full image!)
         val roiGray = FloatArray(searchW * searchH)
         for (y in 0 until searchH) {
             val srcRowOffset = (startY + y) * imageWidth + startX
@@ -296,6 +310,18 @@ object GeminiWatermarkRemover {
                 roiGray[dstRowOffset + x] = (0.2126f * r + 0.7152f * g + 0.0722f * b) / 255f
             }
         }
+
+        return findWatermarkMatchInRoi(roiGray, searchW, searchH, startX, startY, targetSizes)
+    }
+
+    private fun findWatermarkMatchInRoi(
+        roiGray: FloatArray,
+        searchW: Int,
+        searchH: Int,
+        startX: Int,
+        startY: Int,
+        targetSizes: IntArray? = null
+    ): DetectionMatch? {
 
         // Test mode-specific sizes or all standard sizes
         val logoSizesToTest = targetSizes ?: intArrayOf(48, 96, 64, 32, 36, 40, 56, 72, 80, 24, 112, 128)
@@ -854,7 +880,22 @@ object GeminiWatermarkRemover {
         return DetectionMatch(fbX, fbY, fallbackSize, fallbackSize, 0f, "Fallback_${mode.name}")
     }
 
-    fun findWatermarkTarget(bitmap: Bitmap, mode: WatermarkMode): DetectionMatch {
+    fun isReverseAlphaMode(mode: WatermarkMode): Boolean {
+        return mode == WatermarkMode.REVERSE_ALPHA_AUG19 ||
+                mode == WatermarkMode.REVERSE_ALPHA_AUG13 ||
+                mode == WatermarkMode.REVERSE_ALPHA_V2_36 ||
+                mode == WatermarkMode.REVERSE_ALPHA_MAY20 ||
+                mode == WatermarkMode.REVERSE_ALPHA_LEGACY
+    }
+
+    fun findWatermarkTarget(
+        bitmap: Bitmap,
+        mode: WatermarkMode,
+        autoDetectForReverseAlpha: Boolean = false
+    ): DetectionMatch {
+        if (isReverseAlphaMode(mode) && !autoDetectForReverseAlpha) {
+            return getFallbackMatch(bitmap.width, bitmap.height, mode)
+        }
         val targetSizes = when (mode) {
             WatermarkMode.REVERSE_ALPHA_AUG13 -> intArrayOf(24)
             WatermarkMode.REVERSE_ALPHA_AUG19 -> intArrayOf(48, 96)
@@ -871,11 +912,15 @@ object GeminiWatermarkRemover {
         }
     }
 
-    fun processImage(bitmap: Bitmap, mode: WatermarkMode = WatermarkMode.AI_MODEL): RemovalResult {
+    fun processImage(
+        bitmap: Bitmap,
+        mode: WatermarkMode = WatermarkMode.AI_MODEL,
+        autoDetectForReverseAlpha: Boolean = false
+    ): RemovalResult {
         val width = bitmap.width
         val height = bitmap.height
 
-        val targetMatch = findWatermarkTarget(bitmap, mode)
+        val targetMatch = findWatermarkTarget(bitmap, mode, autoDetectForReverseAlpha)
 
         val pixels = IntArray(width * height)
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
@@ -907,6 +952,49 @@ object GeminiWatermarkRemover {
         outputBitmap.setPixels(pixels, 0, width, 0, 0, width, height)
 
         return RemovalResult(outputBitmap, detected = (targetMatch.score >= 0.08f), match = targetMatch)
+    }
+
+    /**
+     * Ultra-fast localized watermark removal on small cropped ROI preview bitmaps.
+     */
+    fun processCroppedRoi(
+        roiBitmap: Bitmap,
+        cropOffsetX: Int,
+        cropOffsetY: Int,
+        mode: WatermarkMode,
+        targetMatch: DetectionMatch
+    ): Bitmap {
+        val width = roiBitmap.width
+        val height = roiBitmap.height
+        val pixels = IntArray(width * height)
+        roiBitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+
+        val localX = targetMatch.x - cropOffsetX
+        val localY = targetMatch.y - cropOffsetY
+        val alphaMap = getAlphaMapForModeAndSize(mode, targetMatch.width)
+
+        when (mode) {
+            WatermarkMode.REVERSE_ALPHA_AUG19,
+            WatermarkMode.REVERSE_ALPHA_AUG13,
+            WatermarkMode.REVERSE_ALPHA_V2_36,
+            WatermarkMode.REVERSE_ALPHA_MAY20,
+            WatermarkMode.REVERSE_ALPHA_LEGACY -> {
+                reverseAlphaBlendRegion(pixels, width, alphaMap, localX, localY, targetMatch.width, targetMatch.height, 1.0f)
+            }
+            WatermarkMode.IDW_INPAINT -> {
+                idwInpaintRegion(pixels, width, alphaMap, localX, localY, targetMatch.width, targetMatch.height, 1.0f)
+            }
+            WatermarkMode.OPENCV_INPAINT -> {
+                teleaInpaintRegion(pixels, width, height, localX, localY, targetMatch.width, targetMatch.height, alphaMap)
+            }
+            WatermarkMode.AI_MODEL, WatermarkMode.ALL_MODES -> {
+                aiDenoiseModelRegion(pixels, width, height, localX, localY, targetMatch.width, targetMatch.height, alphaMap)
+            }
+        }
+
+        val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        out.setPixels(pixels, 0, width, 0, 0, width, height)
+        return out
     }
 
     fun processAndSave(context: Context, sourceUri: Uri, mode: WatermarkMode = WatermarkMode.AI_MODEL): Uri? {

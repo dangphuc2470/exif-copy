@@ -394,6 +394,9 @@ fun MainScreen(
     var watermarkKeepDateTime by remember {
         mutableStateOf(prefs.getBoolean("saved_watermark_keep_date_time", false))
     }
+    var reverseAlphaAutoDetect by remember {
+        mutableStateOf(prefs.getBoolean("saved_reverse_alpha_auto_detect", false))
+    }
     var watermarkPreviewCache by remember {
         mutableStateOf<Map<GeminiWatermarkRemover.WatermarkMode, Bitmap>>(emptyMap())
     }
@@ -405,12 +408,17 @@ fun MainScreen(
     val currentTargetId = currentTargetItem?.id
     val currentTargetUri = currentTargetItem?.uri
 
-    LaunchedEffect(currentTargetId, autoPrecomputeWatermark) {
+    LaunchedEffect(currentTargetId, autoPrecomputeWatermark, reverseAlphaAutoDetect, watermarkMode) {
         if (autoPrecomputeWatermark && currentTargetUri != null) {
             isPrecomputingPreviews = true
             watermarkPreviewCache = emptyMap()
             withContext(Dispatchers.IO) {
-                val previews = WatermarkTimelineHelper.precomputeWatermarkPreviews(context, currentTargetUri)
+                val previews = WatermarkTimelineHelper.precomputeWatermarkPreviews(
+                    context = context,
+                    imageUri = currentTargetUri,
+                    autoDetectForReverseAlpha = reverseAlphaAutoDetect,
+                    preferredMode = watermarkMode
+                )
                 withContext(Dispatchers.Main) {
                     watermarkPreviewCache = previews ?: emptyMap()
                     isPrecomputingPreviews = false
@@ -1420,7 +1428,8 @@ fun MainScreen(
                                                         removeWatermark = removeWatermark,
                                                         watermarkMode = watermarkMode,
                                                         keepOriginalFileName = watermarkKeepFileName,
-                                                        keepOriginalDateTime = watermarkKeepDateTime
+                                                        keepOriginalDateTime = watermarkKeepDateTime,
+                                                        autoDetectForReverseAlpha = reverseAlphaAutoDetect
                                                     )
                                                     if (outputUris.isNotEmpty()) {
                                                         successCount += outputUris.size
@@ -2000,6 +2009,11 @@ fun MainScreen(
                                 onToggleWatermarkKeepDateTime = { enabled ->
                                     watermarkKeepDateTime = enabled
                                     prefs.edit().putBoolean("saved_watermark_keep_date_time", enabled).apply()
+                                },
+                                reverseAlphaAutoDetect = reverseAlphaAutoDetect,
+                                onToggleReverseAlphaAutoDetect = { enabled ->
+                                    reverseAlphaAutoDetect = enabled
+                                    prefs.edit().putBoolean("saved_reverse_alpha_auto_detect", enabled).apply()
                                 },
                                 onOpenExifSettings = { showSettingsDialog = true },
                                 isVi = isVi
@@ -3145,6 +3159,8 @@ fun SettingsTabScreen(
     onToggleWatermarkKeepFileName: (Boolean) -> Unit,
     watermarkKeepDateTime: Boolean,
     onToggleWatermarkKeepDateTime: (Boolean) -> Unit,
+    reverseAlphaAutoDetect: Boolean,
+    onToggleReverseAlphaAutoDetect: (Boolean) -> Unit,
     onOpenExifSettings: () -> Unit,
     isVi: Boolean
 ) {
@@ -3494,6 +3510,35 @@ fun SettingsTabScreen(
                     Switch(
                         checked = watermarkKeepDateTime,
                         onCheckedChange = onToggleWatermarkKeepDateTime
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Toggle 3: Auto-detect Position for Reverse Alpha
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(
+                            text = Strings.reverseAlphaAutoDetectTitle(isVi),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = Strings.reverseAlphaAutoDetectDesc(isVi),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = reverseAlphaAutoDetect,
+                        onCheckedChange = onToggleReverseAlphaAutoDetect
                     )
                 }
             }
