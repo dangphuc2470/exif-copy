@@ -34,5 +34,6 @@ firebase-debug.log
 service-account*.json
 *.jks
 *.keystore
+!app/debug.keystore
 .env
 .env.*

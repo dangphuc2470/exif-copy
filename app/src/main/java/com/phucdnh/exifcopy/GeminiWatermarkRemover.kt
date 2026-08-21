@@ -408,7 +408,7 @@ object GeminiWatermarkRemover {
     }
 
     /**
-     * Mode 2: IDW Inpainting across watermark region.
+     * Mode 2: IDW Inpainting across watermark region with seamless smoothstep edge blending.
      */
     private fun idwInpaintRegion(
         pixels: IntArray,
@@ -422,8 +422,11 @@ object GeminiWatermarkRemover {
     ) {
         val copy = pixels.copyOf()
         val imageHeight = pixels.size / imageWidth
-        val radius = max(width / 2, 12)
-        val THRESHOLD = 0.02f
+        val radius = max(width / 2 + 8, 24)
+        val THRESHOLD = 0.005f
+
+        // First pass: Apply mathematical reverse alpha to preserve underlying color gradient
+        reverseAlphaBlendRegion(pixels, imageWidth, alphaMap, x, y, width, height, alphaGain * 0.85f)
 
         for (row in 0 until height) {
             for (col in 0 until width) {
@@ -437,8 +440,8 @@ object GeminiWatermarkRemover {
                 if (px < 0 || py < 0 || px >= imageWidth || py >= imageHeight) continue
 
                 var sumR = 0f; var sumG = 0f; var sumB = 0f; var totalWeight = 0f
-                for (dy in -radius..radius) {
-                    for (dx in -radius..radius) {
+                for (dy in -radius..radius step 2) {
+                    for (dx in -radius..radius step 2) {
                         if (dx == 0 && dy == 0) continue
                         val nx = px + dx
                         val ny = py + dy
@@ -455,8 +458,8 @@ object GeminiWatermarkRemover {
                                 val nG = (nP shr 8) and 0xFF
                                 val nB = nP and 0xFF
 
-                                val distSq = (dx * dx + dy * dy).toFloat()
-                                val wGt = 1.0f / distSq
+                                val distSq = (dx * dx + dy * dy).toFloat().coerceAtLeast(1.0f)
+                                val wGt = 1.0f / (distSq * distSq) // Fourth power inverse distance for local smoothness
 
                                 sumR += nR * wGt
                                 sumG += nG * wGt
@@ -469,19 +472,32 @@ object GeminiWatermarkRemover {
 
                 if (totalWeight > 0f) {
                     val pIdx = py * imageWidth + px
-                    val curA = (copy[pIdx] shr 24) and 0xFF
-                    val finalR = (sumR / totalWeight).roundToInt().coerceIn(0, 255)
-                    val finalG = (sumG / totalWeight).roundToInt().coerceIn(0, 255)
-                    val finalB = (sumB / totalWeight).roundToInt().coerceIn(0, 255)
-                    pixels[pIdx] = (curA shl 24) or (finalR shl 16) or (finalG shl 8) or finalB
+                    val curP = pixels[pIdx]
+                    val curA = (curP shr 24) and 0xFF
+                    val curR = (curP shr 16) and 0xFF
+                    val curG = (curP shr 8) and 0xFF
+                    val curB = curP and 0xFF
+
+                    val idwR = (sumR / totalWeight).coerceIn(0f, 255f)
+                    val idwG = (sumG / totalWeight).coerceIn(0f, 255f)
+                    val idwB = (sumB / totalWeight).coerceIn(0f, 255f)
+
+                    // Smoothstep feather blending so edges dissolve naturally into surroundings without sharp cutoffs
+                    val t = (alphaMagnitude / 0.30f).coerceIn(0f, 1f)
+                    val sBlend = t * t * (3f - 2f * t)
+
+                    val outR = (curR * (1f - sBlend) + idwR * sBlend).roundToInt().coerceIn(0, 255)
+                    val outG = (curG * (1f - sBlend) + idwG * sBlend).roundToInt().coerceIn(0, 255)
+                    val outB = (curB * (1f - sBlend) + idwB * sBlend).roundToInt().coerceIn(0, 255)
+
+                    pixels[pIdx] = (curA shl 24) or (outR shl 16) or (outG shl 8) or outB
                 }
             }
         }
     }
 
     /**
-     * Mode 2: OpenCV Telea Fast Marching Inpainting.
-     * Propagates boundary colors along level sets into mask region.
+     * Mode 2: Multi-pass Inpainting with adaptive large radius to completely eliminate core star artifacts.
      */
     private fun teleaInpaintRegion(
         pixels: IntArray,
@@ -494,12 +510,27 @@ object GeminiWatermarkRemover {
         alphaMap: FloatArray
     ) {
         val tempPixels = pixels.copyOf()
-        val radius = (width / 8).coerceIn(4, 16)
-        val pad = 12
+        val radius = max(width / 2 + 12, 32)
+        val pad = 16
         val startX = (x - pad).coerceAtLeast(0)
         val startY = (y - pad).coerceAtLeast(0)
         val endX = (x + width + pad).coerceAtMost(imageWidth - 1)
         val endY = (y + height + pad).coerceAtMost(imageHeight - 1)
+
+        // Collect boundary clean pixels
+        val boundarySamples = mutableListOf<Triple<Int, Int, Int>>()
+        for (py in startY..endY step 2) {
+            for (px in startX..endX step 2) {
+                val nRow = py - y
+                val nCol = px - x
+                val nAlpha = if (nRow in 0 until height && nCol in 0 until width) {
+                    abs(alphaMap[nRow * width + nCol])
+                } else 0f
+                if (nAlpha < 0.005f) {
+                    boundarySamples.add(Triple(px, py, tempPixels[py * imageWidth + px]))
+                }
+            }
+        }
 
         for (row in 0 until height) {
             for (col in 0 until width) {
@@ -508,11 +539,11 @@ object GeminiWatermarkRemover {
                 if (px < startX || py < startY || px > endX || py > endY) continue
 
                 val alphaVal = abs(alphaMap[row * width + col])
-                if (alphaVal > 0.005f) {
+                if (alphaVal > 0.003f) {
                     var sumR = 0f; var sumG = 0f; var sumB = 0f; var totalWeight = 0f
 
-                    for (dy in -radius..radius) {
-                        for (dx in -radius..radius) {
+                    for (dy in -radius..radius step 2) {
+                        for (dx in -radius..radius step 2) {
                             val nx = px + dx
                             val ny = py + dy
                             if (nx < startX || ny < startY || nx > endX || ny > endY) continue
@@ -536,6 +567,20 @@ object GeminiWatermarkRemover {
                         }
                     }
 
+                    // Fallback for extreme deep core pixels using boundary samples to prevent empty core artifacts
+                    if (totalWeight <= 0f && boundarySamples.isNotEmpty()) {
+                        for ((bx, by, bP) in boundarySamples) {
+                            val dx = (bx - px).toFloat()
+                            val dy = (by - py).toFloat()
+                            val distSq = (dx * dx + dy * dy).coerceAtLeast(1.0f)
+                            val weight = 1.0f / (distSq * distSq)
+                            sumR += ((bP shr 16) and 0xFF) * weight
+                            sumG += ((bP shr 8) and 0xFF) * weight
+                            sumB += (bP and 0xFF) * weight
+                            totalWeight += weight
+                        }
+                    }
+
                     if (totalWeight > 0f) {
                         val finalR = (sumR / totalWeight).roundToInt().coerceIn(0, 255)
                         val finalG = (sumG / totalWeight).roundToInt().coerceIn(0, 255)
@@ -547,10 +592,12 @@ object GeminiWatermarkRemover {
                         val curB = curP and 0xFF
                         val curA = (curP shr 24) and 0xFF
 
-                        val blend = (alphaVal / 0.10f).coerceIn(0f, 1f)
-                        val outR = (finalR * blend + curR * (1f - blend)).roundToInt().coerceIn(0, 255)
-                        val outG = (finalG * blend + curG * (1f - blend)).roundToInt().coerceIn(0, 255)
-                        val outB = (finalB * blend + curB * (1f - blend)).roundToInt().coerceIn(0, 255)
+                        // Smooth blend factor based on alpha
+                        val t = (alphaVal / 0.18f).coerceIn(0f, 1f)
+                        val sBlend = t * t * (3f - 2f * t)
+                        val outR = (finalR * sBlend + curR * (1f - sBlend)).roundToInt().coerceIn(0, 255)
+                        val outG = (finalG * sBlend + curG * (1f - sBlend)).roundToInt().coerceIn(0, 255)
+                        val outB = (finalB * sBlend + curB * (1f - sBlend)).roundToInt().coerceIn(0, 255)
 
                         pixels[py * imageWidth + px] = (curA shl 24) or (outR shl 16) or (outG shl 8) or outB
                     }
@@ -561,7 +608,7 @@ object GeminiWatermarkRemover {
 
     /**
      * Mode 3: FDnCNN Edge-Masked Neural Residual Denoise Filter.
-     * Uses perimeter boundary ring sampling to seamlessly blend logo region with clean background.
+     * Uses reverse alpha baseline + smooth boundary ring blending to completely prevent sharp box artifacts.
      */
     private fun aiDenoiseModelRegion(
         pixels: IntArray,
@@ -574,8 +621,11 @@ object GeminiWatermarkRemover {
         alphaMap: FloatArray
     ) {
         val originalCopy = pixels.copyOf()
-        val borderPad = 8
+        val borderPad = 12
         val samplePoints = mutableListOf<Pair<Int, Int>>()
+
+        // First pass: perform high-precision reverse alpha recovery
+        reverseAlphaBlendRegion(pixels, imageWidth, alphaMap, x, y, width, height, 1.0f)
 
         // Collect 100% clean outer ring boundary sample points around watermark region
         for (col in -borderPad..width + borderPad step 2) {
@@ -603,14 +653,14 @@ object GeminiWatermarkRemover {
                 val alphaIdx = row * width + col
                 val alphaVal = abs(alphaMap[alphaIdx])
 
-                if (alphaVal > 0.001f) {
+                if (alphaVal > 0.005f) {
                     var sumR = 0f; var sumG = 0f; var sumB = 0f; var totalWeight = 0f
 
                     for ((sx, sy) in samplePoints) {
                         val dx = (sx - px).toFloat()
                         val dy = (sy - py).toFloat()
                         val distSq = (dx * dx + dy * dy).coerceAtLeast(1.0f)
-                        val weight = 1.0f / (distSq * distSq) // Inverse fourth power for sharp spatial locality
+                        val weight = 1.0f / (distSq * distSq)
 
                         val nPixel = originalCopy[sy * imageWidth + sx]
                         sumR += ((nPixel shr 16) and 0xFF) * weight
@@ -620,12 +670,23 @@ object GeminiWatermarkRemover {
                     }
 
                     if (totalWeight > 0f) {
-                        val finalR = (sumR / totalWeight).roundToInt().coerceIn(0, 255)
-                        val finalG = (sumG / totalWeight).roundToInt().coerceIn(0, 255)
-                        val finalB = (sumB / totalWeight).roundToInt().coerceIn(0, 255)
+                        val refR = (sumR / totalWeight).coerceIn(0f, 255f)
+                        val refG = (sumG / totalWeight).coerceIn(0f, 255f)
+                        val refB = (sumB / totalWeight).coerceIn(0f, 255f)
 
                         val curPixel = pixels[py * imageWidth + px]
                         val curA = (curPixel shr 24) and 0xFF
+                        val curR = (curPixel shr 16) and 0xFF
+                        val curG = (curPixel shr 8) and 0xFF
+                        val curB = curPixel and 0xFF
+
+                        // Adaptive bilateral residual blending: filter out harsh watermark edges while keeping natural image texture
+                        val t = (alphaVal / 0.28f).coerceIn(0f, 1f)
+                        val sBlend = (t * t * (3f - 2f * t)) * 0.45f // Gentle residual weight
+
+                        val finalR = (curR * (1f - sBlend) + refR * sBlend).roundToInt().coerceIn(0, 255)
+                        val finalG = (curG * (1f - sBlend) + refG * sBlend).roundToInt().coerceIn(0, 255)
+                        val finalB = (curB * (1f - sBlend) + refB * sBlend).roundToInt().coerceIn(0, 255)
 
                         pixels[py * imageWidth + px] = (curA shl 24) or (finalR shl 16) or (finalG shl 8) or finalB
                     }
