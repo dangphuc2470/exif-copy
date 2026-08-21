@@ -63,14 +63,31 @@ jobs:
             --stacktrace
 
       - name: Upload to Firebase App Distribution
-        uses: wzieba/Firebase-Distribution-Github-Action@v1
-        with:
-          appId: ${{ secrets.FIREBASE_APP_ID }}
-          serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          token: ${{ secrets.FIREBASE_TOKEN }}
-          groups: tester
-          releaseNotes: "Version ${{ steps.version.outputs.version_name }} (Build #${{ github.run_number }}): ${{ github.event.head_commit.message }}"
-          file: app/build/outputs/apk/release/app-release.apk
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+        run: |
+          npm install -g firebase-tools
+          if [ -n "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "Authenticating with Firebase Service Account..."
+            echo "$FIREBASE_SERVICE_ACCOUNT" > sa.json
+            export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/sa.json"
+            firebase appdistribution:distribute app/build/outputs/apk/release/app-release.apk \
+              --app "$FIREBASE_APP_ID" \
+              --groups "tester" \
+              --release-notes "Version ${{ steps.version.outputs.version_name }} (Build #${{ github.run_number }}): ${{ github.event.head_commit.message }}"
+          elif [ -n "$FIREBASE_TOKEN" ]; then
+            echo "Authenticating with Firebase CI Token..."
+            firebase appdistribution:distribute app/build/outputs/apk/release/app-release.apk \
+              --app "$FIREBASE_APP_ID" \
+              --token "$FIREBASE_TOKEN" \
+              --groups "tester" \
+              --release-notes "Version ${{ steps.version.outputs.version_name }} (Build #${{ github.run_number }}): ${{ github.event.head_commit.message }}"
+          else
+            echo "::error::Neither FIREBASE_SERVICE_ACCOUNT nor FIREBASE_TOKEN secret is found in GitHub Secrets!"
+            exit 1
+          fi
 
       - name: Upload APK to GitHub Artifacts
         uses: actions/upload-artifact@v4
