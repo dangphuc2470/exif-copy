@@ -1115,44 +1115,6 @@ fun MainScreen(
                                     }
                                 }
 
-                                // Upscale & Blend checkbox (same row below, or separate row)
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier
-                                            .weight(1f, fill = false)
-                                            .clickable { upscaleBlend = !upscaleBlend }
-                                    ) {
-                                        Checkbox(
-                                            checked = upscaleBlend,
-                                            onCheckedChange = { upscaleBlend = it }
-                                        )
-                                        Text(
-                                            text = Strings.upscaleBlendCheckbox(isVi),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                    if (upscaleBlend) {
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Icon(
-                                            Icons.Default.AutoFixHigh,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(16.dp),
-                                            tint = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                }
-
-
                                 // ACTION BUTTON (Full Width)
                                 Button(
                                     onClick = {
