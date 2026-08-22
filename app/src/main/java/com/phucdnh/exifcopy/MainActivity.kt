@@ -4566,275 +4566,293 @@ fun WatermarkAdjustmentBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = sheetState,
         dragHandle = { BottomSheetDefaults.DragHandle() },
-        containerColor = MaterialTheme.colorScheme.surface
+        containerColor = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxHeight(0.80f)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.Tune,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = Strings.manualAdjustmentTitle(isVi),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                IconButton(onClick = onDismissRequest) {
-                    Icon(Icons.Default.Close, contentDescription = "Close")
-                }
-            }
-
-            Text(
-                text = Strings.manualAdjustmentDesc(isVi),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            // Note on Reverse Alpha exclusion
-            Surface(
-                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f),
-                shape = RoundedCornerShape(6.dp)
-            ) {
-                Text(
-                    text = Strings.manualAdjustmentNote(isVi),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
-                )
-            }
-
-            // Auto-detect Checkbox Toggle
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Header (No close X button)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                    .clickable { onAutoDetectChange(!autoDetect) }
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .padding(horizontal = 20.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = Strings.manualAdjustmentAutoDetect(isVi),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = if (autoDetect) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (autoDetect) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                Icon(
+                    Icons.Default.Tune,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp)
                 )
-                Checkbox(
-                    checked = autoDetect,
-                    onCheckedChange = onAutoDetectChange
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = Strings.manualAdjustmentTitle(isVi),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
                 )
             }
 
-            // Sliders & Controls (Disabled if autoDetect is enabled)
-            val controlAlpha = if (autoDetect) 0.4f else 1.0f
-            Column(
+            // Scrollable content area
+            Box(
                 modifier = Modifier
+                    .weight(1f)
                     .fillMaxWidth()
-                    .alpha(controlAlpha),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Offset X Control
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = Strings.offsetXLabel(isVi, offsetX),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(
-                            onClick = { if (!autoDetect) onOffsetXChange(offsetX - 4) },
-                            enabled = !autoDetect,
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(Icons.Default.Remove, contentDescription = "-4px", modifier = Modifier.size(18.dp))
-                        }
-                        Slider(
-                            value = offsetX.toFloat(),
-                            onValueChange = { if (!autoDetect) onOffsetXChange(it.toInt()) },
-                            valueRange = -150f..150f,
-                            enabled = !autoDetect,
-                            modifier = Modifier.width(140.dp)
-                        )
-                        IconButton(
-                            onClick = { if (!autoDetect) onOffsetXChange(offsetX + 4) },
-                            enabled = !autoDetect,
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = "+4px", modifier = Modifier.size(18.dp))
-                        }
-                    }
-                }
-
-                // Offset Y Control
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = Strings.offsetYLabel(isVi, offsetY),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(
-                            onClick = { if (!autoDetect) onOffsetYChange(offsetY - 4) },
-                            enabled = !autoDetect,
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(Icons.Default.Remove, contentDescription = "-4px", modifier = Modifier.size(18.dp))
-                        }
-                        Slider(
-                            value = offsetY.toFloat(),
-                            onValueChange = { if (!autoDetect) onOffsetYChange(it.toInt()) },
-                            valueRange = -150f..150f,
-                            enabled = !autoDetect,
-                            modifier = Modifier.width(140.dp)
-                        )
-                        IconButton(
-                            onClick = { if (!autoDetect) onOffsetYChange(offsetY + 4) },
-                            enabled = !autoDetect,
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = "+4px", modifier = Modifier.size(18.dp))
-                        }
-                    }
-                }
-
-                // Box Size Chips
-                Text(
-                    text = Strings.boxSizeLabel(isVi, boxSize),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    listOf(24, 36, 48, 64, 96, 128).forEach { size ->
-                        FilterChip(
-                            selected = boxSize == size,
-                            onClick = { if (!autoDetect) onBoxSizeChange(size) },
-                            enabled = !autoDetect,
-                            label = { Text("${size}px", fontSize = 12.sp) }
-                        )
-                    }
-                }
-            }
-
-            // VISUAL LIVE ROI PREVIEW WITH RED MASK OVERLAY
-            if (roiBitmap != null) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = Strings.manualAdjustmentPreviewTitle(isVi),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-
-                val displaySizeDp = 220.dp
-                val displaySizePx = with(LocalDensity.current) { displaySizeDp.toPx() }
-                val scale = displaySizePx / roiSpan.toFloat()
-
-                val baseWatermarkMargin = 96
-                val baseWatermarkSize = 48
-                val baseLocalX = roiSpan - baseWatermarkMargin - baseWatermarkSize
-                val baseLocalY = roiSpan - baseWatermarkMargin - baseWatermarkSize
-
-                val targetLocalX = if (autoDetect) baseLocalX else (baseLocalX + offsetX)
-                val targetLocalY = if (autoDetect) baseLocalY else (baseLocalY + offsetY)
-                val targetSize = if (autoDetect) baseWatermarkSize else boxSize
-
-                val rectLeftPx = (targetLocalX * scale).coerceAtLeast(0f)
-                val rectTopPx = (targetLocalY * scale).coerceAtLeast(0f)
-                val rectWidthPx = (targetSize * scale).coerceAtMost(displaySizePx - rectLeftPx)
-                val rectHeightPx = (targetSize * scale).coerceAtMost(displaySizePx - rectTopPx)
-
-                Box(
+                Column(
                     modifier = Modifier
-                        .size(displaySizeDp)
-                        .align(Alignment.CenterHorizontally)
-                        .clip(RoundedCornerShape(10.dp))
-                        .border(1.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Image(
-                        bitmap = roiBitmap!!.asImageBitmap(),
-                        contentDescription = "ROI Preview",
-                        modifier = Modifier.fillMaxSize()
+                    Text(
+                        text = Strings.manualAdjustmentDesc(isVi),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        drawRect(
-                            color = Color(0xFFE53935).copy(alpha = 0.35f),
-                            topLeft = Offset(rectLeftPx, rectTopPx),
-                            size = androidx.compose.ui.geometry.Size(rectWidthPx, rectHeightPx)
+                    // Note on Reverse Alpha exclusion
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = Strings.manualAdjustmentNote(isVi),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
                         )
-                        drawRect(
-                            color = Color(0xFFE53935),
-                            topLeft = Offset(rectLeftPx, rectTopPx),
-                            size = androidx.compose.ui.geometry.Size(rectWidthPx, rectHeightPx),
-                            style = Stroke(width = 2.dp.toPx())
+                    }
+
+                    // Auto-detect Checkbox Toggle
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            .clickable { onAutoDetectChange(!autoDetect) }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = Strings.manualAdjustmentAutoDetect(isVi),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (autoDetect) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (autoDetect) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                         )
+                        Checkbox(
+                            checked = autoDetect,
+                            onCheckedChange = onAutoDetectChange
+                        )
+                    }
+
+                    // Sliders & Controls (Disabled if autoDetect is enabled)
+                    val controlAlpha = if (autoDetect) 0.4f else 1.0f
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .alpha(controlAlpha),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Offset X Control
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = Strings.offsetXLabel(isVi, offsetX),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = { if (!autoDetect) onOffsetXChange(offsetX - 4) },
+                                    enabled = !autoDetect,
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.Remove, contentDescription = "-4px", modifier = Modifier.size(18.dp))
+                                }
+                                Slider(
+                                    value = offsetX.toFloat(),
+                                    onValueChange = { if (!autoDetect) onOffsetXChange(it.toInt()) },
+                                    valueRange = -150f..150f,
+                                    enabled = !autoDetect,
+                                    modifier = Modifier.width(140.dp)
+                                )
+                                IconButton(
+                                    onClick = { if (!autoDetect) onOffsetXChange(offsetX + 4) },
+                                    enabled = !autoDetect,
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = "+4px", modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        }
+
+                        // Offset Y Control
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = Strings.offsetYLabel(isVi, offsetY),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = { if (!autoDetect) onOffsetYChange(offsetY - 4) },
+                                    enabled = !autoDetect,
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.Remove, contentDescription = "-4px", modifier = Modifier.size(18.dp))
+                                }
+                                Slider(
+                                    value = offsetY.toFloat(),
+                                    onValueChange = { if (!autoDetect) onOffsetYChange(it.toInt()) },
+                                    valueRange = -150f..150f,
+                                    enabled = !autoDetect,
+                                    modifier = Modifier.width(140.dp)
+                                )
+                                IconButton(
+                                    onClick = { if (!autoDetect) onOffsetYChange(offsetY + 4) },
+                                    enabled = !autoDetect,
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = "+4px", modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        }
+
+                        // Box Size Chips
+                        Text(
+                            text = Strings.boxSizeLabel(isVi, boxSize),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf(24, 36, 48, 64, 96, 128).forEach { size ->
+                                FilterChip(
+                                    selected = boxSize == size,
+                                    onClick = { if (!autoDetect) onBoxSizeChange(size) },
+                                    enabled = !autoDetect,
+                                    label = { Text("${size}px", fontSize = 12.sp) }
+                                )
+                            }
+                        }
+                    }
+
+                    // VISUAL LIVE ROI PREVIEW WITH RED MASK OVERLAY
+                    if (roiBitmap != null) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = Strings.manualAdjustmentPreviewTitle(isVi),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+
+                        val displaySizeDp = 200.dp
+                        val displaySizePx = with(LocalDensity.current) { displaySizeDp.toPx() }
+                        val scale = displaySizePx / roiSpan.toFloat()
+
+                        val baseWatermarkMargin = 96
+                        val baseWatermarkSize = 48
+                        val baseLocalX = roiSpan - baseWatermarkMargin - baseWatermarkSize
+                        val baseLocalY = roiSpan - baseWatermarkMargin - baseWatermarkSize
+
+                        val targetLocalX = if (autoDetect) baseLocalX else (baseLocalX + offsetX)
+                        val targetLocalY = if (autoDetect) baseLocalY else (baseLocalY + offsetY)
+                        val targetSize = if (autoDetect) baseWatermarkSize else boxSize
+
+                        val rectLeftPx = (targetLocalX * scale).coerceAtLeast(0f)
+                        val rectTopPx = (targetLocalY * scale).coerceAtLeast(0f)
+                        val rectWidthPx = (targetSize * scale).coerceAtMost(displaySizePx - rectLeftPx)
+                        val rectHeightPx = (targetSize * scale).coerceAtMost(displaySizePx - rectTopPx)
+
+                        Box(
+                            modifier = Modifier
+                                .size(displaySizeDp)
+                                .align(Alignment.CenterHorizontally)
+                                .clip(RoundedCornerShape(10.dp))
+                                .border(1.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                        ) {
+                            Image(
+                                bitmap = roiBitmap!!.asImageBitmap(),
+                                contentDescription = "ROI Preview",
+                                modifier = Modifier.fillMaxSize()
+                            )
+
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                drawRect(
+                                    color = Color(0xFFE53935).copy(alpha = 0.35f),
+                                    topLeft = Offset(rectLeftPx, rectTopPx),
+                                    size = androidx.compose.ui.geometry.Size(rectWidthPx, rectHeightPx)
+                                )
+                                drawRect(
+                                    color = Color(0xFFE53935),
+                                    topLeft = Offset(rectLeftPx, rectTopPx),
+                                    size = androidx.compose.ui.geometry.Size(rectWidthPx, rectHeightPx),
+                                    style = Stroke(width = 2.dp.toPx())
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+            }
+
+            // STICKY BOTTOM ACTION BAR
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 4.dp,
+                shadowElevation = 8.dp
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            onOffsetXChange(0)
+                            onOffsetYChange(0)
+                            onBoxSizeChange(48)
+                            onAutoDetectChange(false)
+                            onReset()
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                    ) {
+                        Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(Strings.resetCustomPosBtn(isVi), fontSize = 13.sp)
+                    }
+                    Button(
+                        onClick = {
+                            onSave()
+                            onDismissRequest()
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(Strings.saveCustomPosBtn(isVi), fontSize = 13.sp)
                     }
                 }
             }
-
-            // Action buttons: Save & Reset
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)
-            ) {
-                OutlinedButton(
-                    onClick = {
-                        onOffsetXChange(0)
-                        onOffsetYChange(0)
-                        onBoxSizeChange(48)
-                        onAutoDetectChange(false)
-                        onReset()
-                    },
-                    modifier = Modifier.height(40.dp)
-                ) {
-                    Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(Strings.resetCustomPosBtn(isVi), fontSize = 13.sp)
-                }
-                Button(
-                    onClick = {
-                        onSave()
-                        onDismissRequest()
-                    },
-                    modifier = Modifier.height(40.dp)
-                ) {
-                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(Strings.saveCustomPosBtn(isVi), fontSize = 13.sp)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
