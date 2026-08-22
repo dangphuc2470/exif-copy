@@ -34,6 +34,11 @@ fun SettingsDialog(
     var focalMaxOffset by remember { mutableStateOf(currentSettings.focalMaxOffset) }
     var focalFixedValue by remember { mutableStateOf(currentSettings.focalFixedValue ?: "") }
 
+    var randomizeIso by remember { mutableStateOf(currentSettings.randomizeIso) }
+    var isoMin by remember { mutableStateOf(currentSettings.isoMin) }
+    var isoMax by remember { mutableStateOf(currentSettings.isoMax) }
+    var isoFixedValue by remember { mutableStateOf(currentSettings.isoFixedValue ?: "") }
+
     var randomizeTime by remember { mutableStateOf(currentSettings.randomizeTime) }
     var timeMinSecs by remember { mutableStateOf(currentSettings.timeMinSecs) }
     var timeMaxSecs by remember { mutableStateOf(currentSettings.timeMaxSecs) }
@@ -250,6 +255,47 @@ fun SettingsDialog(
                     }
                 }
 
+                // Section: ISO (Độ nhạy sáng)
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(if (isVi) "Độ nhạy sáng (ISO)" else "ISO Sensitivity", style = MaterialTheme.typography.titleMedium)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = isoFixedValue,
+                            onValueChange = { isoFixedValue = it },
+                            label = { Text(if (isVi) "Giá trị cố định (vd: 100, 400, 800)" else "Fixed value (e.g. 100, 400, 800)") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            enabled = isoFixedValue.isNotEmpty() || (!randomizeIso)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = randomizeIso && isoFixedValue.isEmpty(),
+                                onCheckedChange = {
+                                    randomizeIso = it
+                                    if (it) isoFixedValue = ""
+                                },
+                                enabled = isoFixedValue.isEmpty()
+                            )
+                            Text(if (isVi) "Random theo khoảng ISO" else "Randomize within ISO range")
+                        }
+                        if (randomizeIso && isoFixedValue.isEmpty()) {
+                            Text(if (isVi) "Khoảng ISO: $isoMin đến $isoMax" else "ISO Range: $isoMin to $isoMax")
+                            RangeSlider(
+                                value = isoMin.toFloat()..isoMax.toFloat(),
+                                onValueChange = { range ->
+                                    isoMin = range.start.toInt()
+                                    isoMax = range.endInclusive.toInt()
+                                },
+                                valueRange = 50f..6400f,
+                                steps = 0,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+
                 // Section: Date Time Sequence
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(12.dp)) {
@@ -304,6 +350,11 @@ fun SettingsDialog(
                         focalMinOffset = focalMinOffset,
                         focalMaxOffset = focalMaxOffset,
                         focalFixedValue = focalFixedValue.ifBlank { null },
+
+                        randomizeIso = randomizeIso,
+                        isoMin = isoMin,
+                        isoMax = isoMax,
+                        isoFixedValue = isoFixedValue.ifBlank { null },
                         
                         randomizeTime = randomizeTime,
                         timeMinSecs = timeMinSecs,

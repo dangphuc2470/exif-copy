@@ -37,6 +37,11 @@ data class ExifSettings(
     val focalMinOffset: Double = -5.0, // e.g. -5mm to +5mm
     val focalMaxOffset: Double = 5.0,
     val focalFixedValue: String? = null,
+
+    val randomizeIso: Boolean = false,
+    val isoMin: Int = 50,
+    val isoMax: Int = 1600,
+    val isoFixedValue: String? = null,
     
     val randomizeTime: Boolean = false,
     val timeMinSecs: Long = 10,
@@ -453,7 +458,24 @@ object ExifMetadataHelper {
                     }
                 }
                 if (copyShooting) {
-                    if (sourceAttributes[ExifInterface.TAG_ISO_SPEED_RATINGS].isNullOrBlank()) {
+                    // Adjust ISO
+                    if (settings.isoFixedValue != null && settings.isoFixedValue.isNotBlank()) {
+                        sourceAttributes[ExifInterface.TAG_ISO_SPEED_RATINGS] = settings.isoFixedValue
+                        sourceAttributes[ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY] = settings.isoFixedValue
+                        log(context, "Gán fixed ISO = ${settings.isoFixedValue}")
+                    } else if (settings.randomizeIso) {
+                        val standardIsos = intArrayOf(50, 64, 80, 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200, 6400)
+                        val validIsos = standardIsos.filter { it in settings.isoMin..settings.isoMax }
+                        val newIso = if (validIsos.isNotEmpty()) {
+                            validIsos.random()
+                        } else {
+                            Random.nextInt(settings.isoMin, settings.isoMax + 1)
+                        }
+                        val isoStr = newIso.toString()
+                        sourceAttributes[ExifInterface.TAG_ISO_SPEED_RATINGS] = isoStr
+                        sourceAttributes[ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY] = isoStr
+                        log(context, "Random ISO: $isoStr (khoảng ${settings.isoMin}..${settings.isoMax})")
+                    } else if (sourceAttributes[ExifInterface.TAG_ISO_SPEED_RATINGS].isNullOrBlank()) {
                         sourceAttributes[ExifInterface.TAG_ISO_SPEED_RATINGS] = "100"
                         log(context, "Gán mặc định ISO = 100")
                     }
@@ -657,9 +679,17 @@ object ExifMetadataHelper {
                 }
 
                 // Save to public storage (Pictures/EXIFCopy)
-                val baseName = getBaseName(rawFileName)
-                val nameWithSuffix = "$baseName$suffix"
-                val fileName = getUniqueFileName(context, nameWithSuffix, tempExt)
+                val targetDateTimeStr = sourceAttributes[ExifInterface.TAG_DATETIME_ORIGINAL]
+                    ?: sourceAttributes[ExifInterface.TAG_DATETIME]
+                    ?: sourceAttributes[ExifInterface.TAG_DATETIME_DIGITIZED]
+
+                val fileName = generateFormattedFileName(
+                    context = context,
+                    exifDateTime = targetDateTimeStr,
+                    fallbackOriginalName = rawFileName,
+                    suffix = suffix,
+                    extension = tempExt
+                )
                 log(context, "Tên file đích cuối cùng: $fileName")
                 var savedUri = saveToPublicPictures(context, runTempFile, fileName, outputMimeType)
                 if (savedUri != null) {
@@ -709,7 +739,13 @@ object ExifMetadataHelper {
                                 }
                                 try { blendExif.saveAttributes() } catch (_: Exception) {}
                                 // Overwrite the existing savedUri file path
-                                val blendFileName = getUniqueFileName(context, "${baseName}${suffix}_blend", tempExt)
+                                val blendFileName = generateFormattedFileName(
+                                    context = context,
+                                    exifDateTime = targetDateTimeStr,
+                                    fallbackOriginalName = rawFileName,
+                                    suffix = "${suffix}_blend",
+                                    extension = tempExt
+                                )
                                 val blendedUri = saveToPublicPictures(context, blendTempFile, blendFileName, outputMimeType)
                                 blendTempFile.delete()
                                 if (blendedUri != null) {
@@ -830,8 +866,17 @@ object ExifMetadataHelper {
                     log(context, "Bỏ qua saveAttributes nếu không hỗ trợ EXIF: ${e.message}")
                 }
 
-                val nameWithSuffix = "$baseName$suffix"
-                val fileName = getUniqueFileName(context, nameWithSuffix, tempExt)
+                val targetDateTimeStr = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
+                    ?: exif.getAttribute(ExifInterface.TAG_DATETIME)
+                    ?: exif.getAttribute(ExifInterface.TAG_DATETIME_DIGITIZED)
+
+                val fileName = generateFormattedFileName(
+                    context = context,
+                    exifDateTime = targetDateTimeStr,
+                    fallbackOriginalName = rawFileName,
+                    suffix = suffix,
+                    extension = tempExt
+                )
                 val savedUri = saveToPublicPictures(context, runTempFile, fileName, targetMimeType)
                 log(context, "Đã lưu bản sao vào Pictures/EXIFCopy: $fileName. Output URI: $savedUri")
                 runTempFile.delete()
@@ -966,8 +1011,19 @@ object ExifMetadataHelper {
                     log(context, "Bỏ qua saveAttributes: ${e.message}")
                 }
 
-                val nameWithSuffix = "$baseName$suffix"
-                val fileName = getUniqueFileName(context, nameWithSuffix, tempExt)
+                val targetDateTimeStr = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
+                    ?: exif.getAttribute(ExifInterface.TAG_DATETIME)
+                    ?: exif.getAttribute(ExifInterface.TAG_DATETIME_DIGITIZED)
+                    ?: origDateTimeOrig
+                    ?: origDateTime
+
+                val fileName = generateFormattedFileName(
+                    context = context,
+                    exifDateTime = targetDateTimeStr,
+                    fallbackOriginalName = rawFileName,
+                    suffix = suffix,
+                    extension = tempExt
+                )
                 val savedUri = saveToPublicPictures(context, runTempFile, fileName, targetMimeType)
                 if (savedUri != null) {
                     savedUris.add(savedUri)
@@ -1217,8 +1273,47 @@ object ExifMetadataHelper {
         return try {
             format.parse(dateStr)
         } catch (e: Exception) {
-            null
+            parseExifDateFlexible(dateStr)
         }
+    }
+
+    fun parseExifDateFlexible(dateStr: String?): Date? {
+        if (dateStr.isNullOrBlank()) return null
+        val formats = listOf(
+            "yyyy:MM:dd HH:mm:ss",
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy/MM/dd HH:mm:ss",
+            "yyyyMMdd_HHmmss",
+            "yyyy:MM:dd HH:mm:ss.SSS",
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
+        )
+        for (pattern in formats) {
+            try {
+                val fmt = SimpleDateFormat(pattern, Locale.US)
+                val d = fmt.parse(dateStr)
+                if (d != null) return d
+            } catch (_: Exception) {}
+        }
+        return null
+    }
+
+    fun generateFormattedFileName(
+        context: Context,
+        exifDateTime: String?,
+        fallbackOriginalName: String,
+        suffix: String = "",
+        extension: String
+    ): String {
+        val parsedDate = parseExifDateFlexible(exifDateTime)
+        val baseName = if (parsedDate != null) {
+            val dateFmt = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
+            "IMG_${dateFmt.format(parsedDate)}"
+        } else {
+            getBaseName(fallbackOriginalName)
+        }
+        val nameWithSuffix = "$baseName$suffix"
+        return getUniqueFileName(context, nameWithSuffix, extension)
     }
 
     private fun formatExifDate(date: Date): String {
