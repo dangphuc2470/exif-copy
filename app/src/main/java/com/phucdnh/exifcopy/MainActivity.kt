@@ -406,6 +406,9 @@ fun MainScreen(
     var customWatermarkSize by remember {
         mutableStateOf(prefs.getInt("saved_custom_watermark_size", 48))
     }
+    var customWatermarkAutoDetect by remember {
+        mutableStateOf(prefs.getBoolean("saved_custom_watermark_auto_detect", false))
+    }
     var watermarkPreviewCache by remember {
         mutableStateOf<Map<GeminiWatermarkRemover.WatermarkMode, Bitmap>>(emptyMap())
     }
@@ -424,20 +427,24 @@ fun MainScreen(
         watermarkMode,
         customWatermarkOffsetX,
         customWatermarkOffsetY,
-        customWatermarkSize
+        customWatermarkSize,
+        customWatermarkAutoDetect
     ) {
         if (autoPrecomputeWatermark && currentTargetUri != null) {
             isPrecomputingPreviews = true
             watermarkPreviewCache = emptyMap()
             withContext(Dispatchers.IO) {
+                val effOffsetX = if (customWatermarkAutoDetect) 0 else customWatermarkOffsetX
+                val effOffsetY = if (customWatermarkAutoDetect) 0 else customWatermarkOffsetY
+                val effSize = if (customWatermarkAutoDetect) null else customWatermarkSize
                 val previews = WatermarkTimelineHelper.precomputeWatermarkPreviews(
                     context = context,
                     imageUri = currentTargetUri,
                     autoDetectForReverseAlpha = reverseAlphaAutoDetect,
                     preferredMode = watermarkMode,
-                    customOffsetX = customWatermarkOffsetX,
-                    customOffsetY = customWatermarkOffsetY,
-                    customSize = customWatermarkSize
+                    customOffsetX = effOffsetX,
+                    customOffsetY = effOffsetY,
+                    customSize = effSize
                 )
                 withContext(Dispatchers.Main) {
                     watermarkPreviewCache = previews ?: emptyMap()
@@ -1094,11 +1101,17 @@ fun MainScreen(
                                         onOffsetYChange = { customWatermarkOffsetY = it },
                                         boxSize = customWatermarkSize,
                                         onBoxSizeChange = { customWatermarkSize = it },
+                                        autoDetect = customWatermarkAutoDetect,
+                                        onAutoDetectChange = {
+                                            customWatermarkAutoDetect = it
+                                            prefs.edit().putBoolean("saved_custom_watermark_auto_detect", it).apply()
+                                        },
                                         onSave = {
                                             prefs.edit()
                                                 .putInt("saved_custom_watermark_offset_x", customWatermarkOffsetX)
                                                 .putInt("saved_custom_watermark_offset_y", customWatermarkOffsetY)
                                                 .putInt("saved_custom_watermark_size", customWatermarkSize)
+                                                .putBoolean("saved_custom_watermark_auto_detect", customWatermarkAutoDetect)
                                                 .apply()
                                             Toast.makeText(context, Strings.savedCustomPosToast(isVi), Toast.LENGTH_SHORT).show()
                                         },
@@ -1106,13 +1119,16 @@ fun MainScreen(
                                             customWatermarkOffsetX = 0
                                             customWatermarkOffsetY = 0
                                             customWatermarkSize = 48
+                                            customWatermarkAutoDetect = false
                                             prefs.edit()
                                                 .putInt("saved_custom_watermark_offset_x", 0)
                                                 .putInt("saved_custom_watermark_offset_y", 0)
                                                 .putInt("saved_custom_watermark_size", 48)
+                                                .putBoolean("saved_custom_watermark_auto_detect", false)
                                                 .apply()
                                             Toast.makeText(context, Strings.resetCustomPosToast(isVi), Toast.LENGTH_SHORT).show()
                                         },
+                                        targetImageUri = currentTargetUri,
                                         isVi = isVi
                                     )
                                 }
@@ -1460,11 +1476,17 @@ fun MainScreen(
                                         onOffsetYChange = { customWatermarkOffsetY = it },
                                         boxSize = customWatermarkSize,
                                         onBoxSizeChange = { customWatermarkSize = it },
+                                        autoDetect = customWatermarkAutoDetect,
+                                        onAutoDetectChange = {
+                                            customWatermarkAutoDetect = it
+                                            prefs.edit().putBoolean("saved_custom_watermark_auto_detect", it).apply()
+                                        },
                                         onSave = {
                                             prefs.edit()
                                                 .putInt("saved_custom_watermark_offset_x", customWatermarkOffsetX)
                                                 .putInt("saved_custom_watermark_offset_y", customWatermarkOffsetY)
                                                 .putInt("saved_custom_watermark_size", customWatermarkSize)
+                                                .putBoolean("saved_custom_watermark_auto_detect", customWatermarkAutoDetect)
                                                 .apply()
                                             Toast.makeText(context, Strings.savedCustomPosToast(isVi), Toast.LENGTH_SHORT).show()
                                         },
@@ -1472,13 +1494,16 @@ fun MainScreen(
                                             customWatermarkOffsetX = 0
                                             customWatermarkOffsetY = 0
                                             customWatermarkSize = 48
+                                            customWatermarkAutoDetect = false
                                             prefs.edit()
                                                 .putInt("saved_custom_watermark_offset_x", 0)
                                                 .putInt("saved_custom_watermark_offset_y", 0)
                                                 .putInt("saved_custom_watermark_size", 48)
+                                                .putBoolean("saved_custom_watermark_auto_detect", false)
                                                 .apply()
                                             Toast.makeText(context, Strings.resetCustomPosToast(isVi), Toast.LENGTH_SHORT).show()
                                         },
+                                        targetImageUri = currentTargetUri,
                                         isVi = isVi
                                     )
                                 }
@@ -3353,34 +3378,21 @@ fun SettingsTabScreen(
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
+                            // Top Header: Date Range
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Surface(
-                                        color = MaterialTheme.colorScheme.primaryContainer,
-                                        shape = RoundedCornerShape(6.dp)
-                                    ) {
-                                        Text(
-                                            text = item.getDateRange(isVi),
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                        )
-                                    }
-                                }
-
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Checkbox(
-                                        checked = isEnabled,
-                                        onCheckedChange = { onToggleWatermarkMode(item.watermarkMode) }
-                                    )
+                                Surface(
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
                                     Text(
-                                        text = Strings.showInDropdownCheckbox(isVi),
-                                        style = MaterialTheme.typography.bodySmall
+                                        text = item.getDateRange(isVi),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
                                 }
                             }
@@ -3435,6 +3447,32 @@ fun SettingsTabScreen(
                                         Text(Strings.previewWatermark(isVi), fontSize = 11.sp)
                                     }
                                 }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            // Bottom: Show in Dropdown Checkbox
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable { onToggleWatermarkMode(item.watermarkMode) }
+                                    .padding(vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = Strings.showInDropdownCheckbox(isVi),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (isEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = if (isEnabled) FontWeight.Medium else FontWeight.Normal
+                                )
+                                Checkbox(
+                                    checked = isEnabled,
+                                    onCheckedChange = { onToggleWatermarkMode(item.watermarkMode) }
+                                )
                             }
                         }
                     }
@@ -4433,11 +4471,49 @@ fun WatermarkAdjustmentCard(
     onOffsetYChange: (Int) -> Unit,
     boxSize: Int,
     onBoxSizeChange: (Int) -> Unit,
+    autoDetect: Boolean,
+    onAutoDetectChange: (Boolean) -> Unit,
     onSave: () -> Unit,
     onReset: () -> Unit,
+    targetImageUri: Uri?,
     isVi: Boolean
 ) {
     var isExpanded by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    // Load bottom-right corner of target image for visual live preview
+    var roiBitmap by remember(targetImageUri) { mutableStateOf<Bitmap?>(null) }
+    var roiSpan by remember(targetImageUri) { mutableStateOf(380) }
+
+    LaunchedEffect(targetImageUri) {
+        if (targetImageUri != null) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val opts = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }
+                    val bmp = context.contentResolver.openInputStream(targetImageUri)?.use {
+                        BitmapFactory.decodeStream(it, null, opts)
+                    }
+                    if (bmp != null) {
+                        val w = bmp.width
+                        val h = bmp.height
+                        val span = 380.coerceAtMost(kotlin.math.min(w, h))
+                        val cropX = w - span
+                        val cropY = h - span
+                        val cropped = Bitmap.createBitmap(bmp, cropX, cropY, span, span)
+                        bmp.recycle()
+                        withContext(Dispatchers.Main) {
+                            roiBitmap = cropped
+                            roiSpan = span
+                        }
+                    }
+                } catch (e: Exception) {
+                    roiBitmap = null
+                }
+            }
+        } else {
+            roiBitmap = null
+        }
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -4486,83 +4562,211 @@ fun WatermarkAdjustmentCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    // Offset X Control
+                    // Note on Reverse Alpha exclusion
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text(
+                            text = Strings.manualAdjustmentNote(isVi),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                        )
+                    }
+
+                    // Auto-detect Checkbox Toggle
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+                            .clickable { onAutoDetectChange(!autoDetect) }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = Strings.offsetXLabel(isVi, offsetX),
+                            text = Strings.manualAdjustmentAutoDetect(isVi),
                             style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Medium
+                            fontWeight = if (autoDetect) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (autoDetect) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                         )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = { onOffsetXChange(offsetX - 4) }, modifier = Modifier.size(28.dp)) {
-                                Icon(Icons.Default.Remove, contentDescription = "-4px", modifier = Modifier.size(16.dp))
-                            }
-                            Slider(
-                                value = offsetX.toFloat(),
-                                onValueChange = { onOffsetXChange(it.toInt()) },
-                                valueRange = -150f..150f,
-                                modifier = Modifier.width(130.dp)
-                            )
-                            IconButton(onClick = { onOffsetXChange(offsetX + 4) }, modifier = Modifier.size(28.dp)) {
-                                Icon(Icons.Default.Add, contentDescription = "+4px", modifier = Modifier.size(16.dp))
-                            }
-                        }
+                        Checkbox(
+                            checked = autoDetect,
+                            onCheckedChange = onAutoDetectChange
+                        )
                     }
 
-                    // Offset Y Control
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                    // Sliders & Controls (Disabled if autoDetect is enabled)
+                    val controlAlpha = if (autoDetect) 0.4f else 1.0f
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .alpha(controlAlpha),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        // Offset X Control
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = Strings.offsetXLabel(isVi, offsetX),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = { if (!autoDetect) onOffsetXChange(offsetX - 4) },
+                                    enabled = !autoDetect,
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Default.Remove, contentDescription = "-4px", modifier = Modifier.size(16.dp))
+                                }
+                                Slider(
+                                    value = offsetX.toFloat(),
+                                    onValueChange = { if (!autoDetect) onOffsetXChange(it.toInt()) },
+                                    valueRange = -150f..150f,
+                                    enabled = !autoDetect,
+                                    modifier = Modifier.width(130.dp)
+                                )
+                                IconButton(
+                                    onClick = { if (!autoDetect) onOffsetXChange(offsetX + 4) },
+                                    enabled = !autoDetect,
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = "+4px", modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        }
+
+                        // Offset Y Control
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = Strings.offsetYLabel(isVi, offsetY),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = { if (!autoDetect) onOffsetYChange(offsetY - 4) },
+                                    enabled = !autoDetect,
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Default.Remove, contentDescription = "-4px", modifier = Modifier.size(16.dp))
+                                }
+                                Slider(
+                                    value = offsetY.toFloat(),
+                                    onValueChange = { if (!autoDetect) onOffsetYChange(it.toInt()) },
+                                    valueRange = -150f..150f,
+                                    enabled = !autoDetect,
+                                    modifier = Modifier.width(130.dp)
+                                )
+                                IconButton(
+                                    onClick = { if (!autoDetect) onOffsetYChange(offsetY + 4) },
+                                    enabled = !autoDetect,
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = "+4px", modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        }
+
+                        // Box Size Chips
                         Text(
-                            text = Strings.offsetYLabel(isVi, offsetY),
+                            text = Strings.boxSizeLabel(isVi, boxSize),
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Medium
                         )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = { onOffsetYChange(offsetY - 4) }, modifier = Modifier.size(28.dp)) {
-                                Icon(Icons.Default.Remove, contentDescription = "-4px", modifier = Modifier.size(16.dp))
-                            }
-                            Slider(
-                                value = offsetY.toFloat(),
-                                onValueChange = { onOffsetYChange(it.toInt()) },
-                                valueRange = -150f..150f,
-                                modifier = Modifier.width(130.dp)
-                            )
-                            IconButton(onClick = { onOffsetYChange(offsetY + 4) }, modifier = Modifier.size(28.dp)) {
-                                Icon(Icons.Default.Add, contentDescription = "+4px", modifier = Modifier.size(16.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            listOf(24, 36, 48, 64, 96, 128).forEach { size ->
+                                FilterChip(
+                                    selected = boxSize == size,
+                                    onClick = { if (!autoDetect) onBoxSizeChange(size) },
+                                    enabled = !autoDetect,
+                                    label = { Text("${size}px", fontSize = 11.sp) },
+                                    modifier = Modifier.height(28.dp)
+                                )
                             }
                         }
                     }
 
-                    // Box Size Chips
-                    Text(
-                        text = Strings.boxSizeLabel(isVi, boxSize),
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        listOf(24, 36, 48, 64, 96, 128).forEach { size ->
-                            FilterChip(
-                                selected = boxSize == size,
-                                onClick = { onBoxSizeChange(size) },
-                                label = { Text("${size}px", fontSize = 11.sp) },
-                                modifier = Modifier.height(28.dp)
+                    // VISUAL LIVE ROI PREVIEW WITH RED MASK OVERLAY
+                    if (roiBitmap != null) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = Strings.manualAdjustmentPreviewTitle(isVi),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+
+                        val displaySizeDp = 180.dp
+                        val displaySizePx = with(LocalDensity.current) { displaySizeDp.toPx() }
+                        val scale = displaySizePx / roiSpan.toFloat()
+
+                        // Calculate box rect inside the cropped ROI
+                        // Baseline watermark on ROI (48px size with 96px margin from corner)
+                        val baseWatermarkMargin = 96
+                        val baseWatermarkSize = 48
+                        val baseLocalX = roiSpan - baseWatermarkMargin - baseWatermarkSize
+                        val baseLocalY = roiSpan - baseWatermarkMargin - baseWatermarkSize
+
+                        val targetLocalX = if (autoDetect) baseLocalX else (baseLocalX + offsetX)
+                        val targetLocalY = if (autoDetect) baseLocalY else (baseLocalY + offsetY)
+                        val targetSize = if (autoDetect) baseWatermarkSize else boxSize
+
+                        val rectLeftPx = (targetLocalX * scale).coerceAtLeast(0f)
+                        val rectTopPx = (targetLocalY * scale).coerceAtLeast(0f)
+                        val rectWidthPx = (targetSize * scale).coerceAtMost(displaySizePx - rectLeftPx)
+                        val rectHeightPx = (targetSize * scale).coerceAtMost(displaySizePx - rectTopPx)
+
+                        Box(
+                            modifier = Modifier
+                                .size(displaySizeDp)
+                                .align(Alignment.CenterHorizontally)
+                                .clip(RoundedCornerShape(8.dp))
+                                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                        ) {
+                            Image(
+                                bitmap = roiBitmap!!.asImageBitmap(),
+                                contentDescription = "ROI Preview",
+                                modifier = Modifier.fillMaxSize()
                             )
+
+                            // Red mask translucent overlay box
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                // Draw red translucent fill
+                                drawRect(
+                                    color = Color(0xFFE53935).copy(alpha = 0.35f),
+                                    topLeft = Offset(rectLeftPx, rectTopPx),
+                                    size = androidx.compose.ui.geometry.Size(rectWidthPx, rectHeightPx)
+                                )
+                                // Draw red solid border
+                                drawRect(
+                                    color = Color(0xFFE53935),
+                                    topLeft = Offset(rectLeftPx, rectTopPx),
+                                    size = androidx.compose.ui.geometry.Size(rectWidthPx, rectHeightPx),
+                                    style = Stroke(width = 2.dp.toPx())
+                                )
+                            }
                         }
                     }
 
                     // Action buttons: Save & Reset
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
                         horizontalArrangement = Arrangement.End
                     ) {
                         OutlinedButton(

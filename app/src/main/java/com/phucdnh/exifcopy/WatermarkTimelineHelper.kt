@@ -27,8 +27,8 @@ object WatermarkTimelineHelper {
     val TIMELINE_ITEMS = listOf(
         ReverseAlphaTimelineItem(
             id = "ver_1787285344763",
-            dateRangeVi = "Từ 19/08/2026 - Hiện tại",
-            dateRangeEn = "From Aug 19, 2026 - Present",
+            dateRangeVi = "#1 Từ 19/08/2026 - Hiện tại",
+            dateRangeEn = "#1 From Aug 19, 2026 - Present",
             timestampMs = 1787285344763L,
             blackAssetPath = "watermarks/1787285344763.png",
             colorAssetPath = "watermarks/1787283625606.png",
@@ -38,8 +38,8 @@ object WatermarkTimelineHelper {
         ),
         ReverseAlphaTimelineItem(
             id = "ver_1786604160723",
-            dateRangeVi = "13/08/2026 - 18/08/2026",
-            dateRangeEn = "Aug 13, 2026 - Aug 18, 2026",
+            dateRangeVi = "#2 13/08/2026 - 18/08/2026",
+            dateRangeEn = "#2 Aug 13, 2026 - Aug 18, 2026",
             timestampMs = 1786604160723L,
             blackAssetPath = "watermarks/1786604160723.png",
             colorAssetPath = "watermarks/1786604243209.png",
@@ -49,8 +49,8 @@ object WatermarkTimelineHelper {
         ),
         ReverseAlphaTimelineItem(
             id = "ver_20260607",
-            dateRangeVi = "07/06/2026 - 29/07/2026",
-            dateRangeEn = "Jun 07, 2026 - Jul 29, 2026",
+            dateRangeVi = "#3 07/06/2026 - 29/07/2026",
+            dateRangeEn = "#3 Jun 07, 2026 - Jul 29, 2026",
             timestampMs = 1780790400000L,
             blackAssetPath = "watermarks/gemini_v2_36.png",
             colorAssetPath = "watermarks/sample_20260607.png",
@@ -60,8 +60,8 @@ object WatermarkTimelineHelper {
         ),
         ReverseAlphaTimelineItem(
             id = "ver_20260520",
-            dateRangeVi = "20/05/2026 - 06/06/2026",
-            dateRangeEn = "May 20, 2026 - Jun 06, 2026",
+            dateRangeVi = "#4 20/05/2026 - 06/06/2026",
+            dateRangeEn = "#4 May 20, 2026 - Jun 06, 2026",
             timestampMs = 1779235200000L,
             blackAssetPath = "watermarks/bg_96_20260520.png",
             colorAssetPath = "watermarks/sample_20260520.png",
@@ -71,8 +71,8 @@ object WatermarkTimelineHelper {
         ),
         ReverseAlphaTimelineItem(
             id = "ver_legacy",
-            dateRangeVi = "Trước 20/05/2026 (Bản đầu)",
-            dateRangeEn = "Pre May 20, 2026 (Legacy Standard)",
+            dateRangeVi = "#5 Trước 20/05/2026 (Bản đầu)",
+            dateRangeEn = "#5 Pre May 20, 2026 (Legacy Standard)",
             timestampMs = 1770000000000L,
             blackAssetPath = "watermarks/bg_96.png",
             colorAssetPath = "watermarks/bg_48.png",
