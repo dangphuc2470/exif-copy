@@ -409,6 +409,9 @@ fun MainScreen(
     var customWatermarkAutoDetect by remember {
         mutableStateOf(prefs.getBoolean("saved_custom_watermark_auto_detect", false))
     }
+    var showWatermarkAdjustment by remember {
+        mutableStateOf(prefs.getBoolean("saved_show_watermark_adjustment", true))
+    }
     var watermarkPreviewCache by remember {
         mutableStateOf<Map<GeminiWatermarkRemover.WatermarkMode, Bitmap>>(emptyMap())
     }
@@ -428,15 +431,17 @@ fun MainScreen(
         customWatermarkOffsetX,
         customWatermarkOffsetY,
         customWatermarkSize,
-        customWatermarkAutoDetect
+        customWatermarkAutoDetect,
+        showWatermarkAdjustment
     ) {
         if (autoPrecomputeWatermark && currentTargetUri != null) {
             isPrecomputingPreviews = true
             watermarkPreviewCache = emptyMap()
             withContext(Dispatchers.IO) {
-                val effOffsetX = if (customWatermarkAutoDetect) 0 else customWatermarkOffsetX
-                val effOffsetY = if (customWatermarkAutoDetect) 0 else customWatermarkOffsetY
-                val effSize = if (customWatermarkAutoDetect) null else customWatermarkSize
+                val effAutoDetect = if (!showWatermarkAdjustment) true else customWatermarkAutoDetect
+                val effOffsetX = if (effAutoDetect) 0 else customWatermarkOffsetX
+                val effOffsetY = if (effAutoDetect) 0 else customWatermarkOffsetY
+                val effSize = if (effAutoDetect) null else customWatermarkSize
                 val previews = WatermarkTimelineHelper.precomputeWatermarkPreviews(
                     context = context,
                     imageUri = currentTargetUri,
@@ -1093,7 +1098,7 @@ fun MainScreen(
                                     }
                                 }
 
-                                if (removeWatermark && !GeminiWatermarkRemover.isReverseAlphaMode(watermarkMode)) {
+                                if (showWatermarkAdjustment && removeWatermark && !GeminiWatermarkRemover.isReverseAlphaMode(watermarkMode)) {
                                     WatermarkAdjustmentCard(
                                         offsetX = customWatermarkOffsetX,
                                         onOffsetXChange = { customWatermarkOffsetX = it },
@@ -1211,6 +1216,10 @@ fun MainScreen(
                                                     }
 
                                                     val activeSettings = exifSettings
+                                                    val effAutoDetect = if (!showWatermarkAdjustment) true else customWatermarkAutoDetect
+                                                    val effOffsetX = if (effAutoDetect) 0 else customWatermarkOffsetX
+                                                    val effOffsetY = if (effAutoDetect) 0 else customWatermarkOffsetY
+                                                    val effSize = if (effAutoDetect) null else customWatermarkSize
 
                                                     val outputUris = ExifMetadataHelper.copyMetadataList(
                                                         context = context,
@@ -1221,9 +1230,10 @@ fun MainScreen(
                                                         removeWatermark = removeWatermark,
                                                         watermarkMode = watermarkMode,
                                                         upscaleBlend = upscaleBlend,
-                                                        customOffsetX = customWatermarkOffsetX,
-                                                        customOffsetY = customWatermarkOffsetY,
-                                                        customSize = customWatermarkSize
+                                                        customOffsetX = effOffsetX,
+                                                        customOffsetY = effOffsetY,
+                                                        customSize = effSize,
+                                                        itemIndex = i
                                                     )
                                                     if (outputUris.isNotEmpty()) {
                                                         successCount += outputUris.size
@@ -1468,7 +1478,7 @@ fun MainScreen(
                                     }
                                 }
 
-                                if (removeWatermark && !GeminiWatermarkRemover.isReverseAlphaMode(watermarkMode)) {
+                                if (showWatermarkAdjustment && removeWatermark && !GeminiWatermarkRemover.isReverseAlphaMode(watermarkMode)) {
                                     WatermarkAdjustmentCard(
                                         offsetX = customWatermarkOffsetX,
                                         onOffsetXChange = { customWatermarkOffsetX = it },
@@ -1531,6 +1541,11 @@ fun MainScreen(
                                             withContext(Dispatchers.IO) {
                                                 for (i in targetCopy.indices) {
                                                     val targetItem = targetCopy[i]
+                                                    val effAutoDetect = if (!showWatermarkAdjustment) true else customWatermarkAutoDetect
+                                                    val effOffsetX = if (effAutoDetect) 0 else customWatermarkOffsetX
+                                                    val effOffsetY = if (effAutoDetect) 0 else customWatermarkOffsetY
+                                                    val effSize = if (effAutoDetect) null else customWatermarkSize
+
                                                     val outputUris = ExifMetadataHelper.cleanGoogleAiMetadataList(
                                                         context = context,
                                                         targetUri = targetItem.uri,
@@ -1540,9 +1555,9 @@ fun MainScreen(
                                                         keepOriginalFileName = watermarkKeepFileName,
                                                         keepOriginalDateTime = watermarkKeepDateTime,
                                                         autoDetectForReverseAlpha = reverseAlphaAutoDetect,
-                                                        customOffsetX = customWatermarkOffsetX,
-                                                        customOffsetY = customWatermarkOffsetY,
-                                                        customSize = customWatermarkSize
+                                                        customOffsetX = effOffsetX,
+                                                        customOffsetY = effOffsetY,
+                                                        customSize = effSize
                                                     )
                                                     if (outputUris.isNotEmpty()) {
                                                         successCount += outputUris.size
@@ -2127,6 +2142,11 @@ fun MainScreen(
                                 onToggleReverseAlphaAutoDetect = { enabled ->
                                     reverseAlphaAutoDetect = enabled
                                     prefs.edit().putBoolean("saved_reverse_alpha_auto_detect", enabled).apply()
+                                },
+                                showWatermarkAdjustment = showWatermarkAdjustment,
+                                onToggleShowWatermarkAdjustment = { enabled ->
+                                    showWatermarkAdjustment = enabled
+                                    prefs.edit().putBoolean("saved_show_watermark_adjustment", enabled).apply()
                                 },
                                 onOpenExifSettings = { showSettingsDialog = true },
                                 isVi = isVi
@@ -3274,6 +3294,8 @@ fun SettingsTabScreen(
     onToggleWatermarkKeepDateTime: (Boolean) -> Unit,
     reverseAlphaAutoDetect: Boolean,
     onToggleReverseAlphaAutoDetect: (Boolean) -> Unit,
+    showWatermarkAdjustment: Boolean,
+    onToggleShowWatermarkAdjustment: (Boolean) -> Unit,
     onOpenExifSettings: () -> Unit,
     isVi: Boolean
 ) {
@@ -3665,6 +3687,35 @@ fun SettingsTabScreen(
                     Switch(
                         checked = reverseAlphaAutoDetect,
                         onCheckedChange = onToggleReverseAlphaAutoDetect
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Toggle 4: Show Watermark Region Adjustment Card
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(
+                            text = Strings.showWatermarkAdjustmentTitle(isVi),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = Strings.showWatermarkAdjustmentDesc(isVi),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = showWatermarkAdjustment,
+                        onCheckedChange = onToggleShowWatermarkAdjustment
                     )
                 }
             }
