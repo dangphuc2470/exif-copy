@@ -1264,6 +1264,7 @@ fun MainScreen(
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(Strings.copyExifAction(isVi))
                                 }
+                                Spacer(modifier = Modifier.height(40.dp))
                             }
                         }
                     }
@@ -1588,6 +1589,7 @@ fun MainScreen(
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(Strings.removeAiAction(isVi))
                                 }
+                                Spacer(modifier = Modifier.height(40.dp))
                             }
                         }
                     }
@@ -4749,6 +4751,40 @@ fun WatermarkAdjustmentCard(
                                 )
                             }
                         }
+
+                        // Action buttons: Save & Reset to Auto Pos (Placed right below sliders for instant access)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    onOffsetXChange(0)
+                                    onOffsetYChange(0)
+                                    onBoxSizeChange(48)
+                                    onAutoDetectChange(false)
+                                    onReset()
+                                },
+                                modifier = Modifier.height(34.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                            ) {
+                                Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(Strings.resetCustomPosBtn(isVi), fontSize = 11.sp)
+                            }
+                            Button(
+                                onClick = onSave,
+                                modifier = Modifier.height(34.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
+                            ) {
+                                Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(Strings.saveCustomPosBtn(isVi), fontSize = 11.sp)
+                            }
+                        }
                     }
 
                     // VISUAL LIVE ROI PREVIEW WITH RED MASK OVERLAY
@@ -4761,7 +4797,7 @@ fun WatermarkAdjustmentCard(
                             color = MaterialTheme.colorScheme.primary
                         )
 
-                        val displaySizeDp = 180.dp
+                        val displaySizeDp = 140.dp
                         val displaySizePx = with(LocalDensity.current) { displaySizeDp.toPx() }
                         val scale = displaySizePx / roiSpan.toFloat()
 
@@ -4810,38 +4846,6 @@ fun WatermarkAdjustmentCard(
                                     style = Stroke(width = 2.dp.toPx())
                                 )
                             }
-                        }
-                    }
-
-                    // Action buttons: Save & Reset to Auto Pos
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                onOffsetXChange(0)
-                                onOffsetYChange(0)
-                                onBoxSizeChange(48)
-                                onAutoDetectChange(false)
-                                onReset()
-                            },
-                            modifier = Modifier.height(32.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
-                        ) {
-                            Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(Strings.resetCustomPosBtn(isVi), fontSize = 11.sp)
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Button(
-                            onClick = onSave,
-                            modifier = Modifier.height(32.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
-                        ) {
-                            Text(Strings.saveCustomPosBtn(isVi), fontSize = 11.sp)
                         }
                     }
                 }
