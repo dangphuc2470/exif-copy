@@ -63,6 +63,7 @@ import androidx.compose.ui.window.DialogWindowProvider
 import android.view.WindowManager
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -2252,6 +2253,7 @@ fun MainScreen(
                     Toast.makeText(context, Strings.resetCustomPosToast(isVi), Toast.LENGTH_SHORT).show()
                 },
                 targetImageUri = currentTargetUri,
+                onPickTargetImage = { pickTargetLauncher.launch(arrayOf("image/*")) },
                 isVi = isVi
             )
         }
@@ -4486,6 +4488,7 @@ fun WatermarkAdjustmentBottomSheet(
     onSave: () -> Unit,
     onReset: () -> Unit,
     targetImageUri: Uri?,
+    onPickTargetImage: () -> Unit,
     isVi: Boolean
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -4528,10 +4531,13 @@ fun WatermarkAdjustmentBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = sheetState,
         dragHandle = { BottomSheetDefaults.DragHandle() },
-        containerColor = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxHeight(0.80f)
+        containerColor = MaterialTheme.colorScheme.surface
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.85f)
+        ) {
             // Header (No close X button)
             Row(
                 modifier = Modifier
@@ -4600,7 +4606,10 @@ fun WatermarkAdjustmentBottomSheet(
                             text = Strings.manualAdjustmentAutoDetect(isVi),
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = if (autoDetect) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (autoDetect) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            color = if (autoDetect) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 8.dp)
                         )
                         Checkbox(
                             checked = autoDetect,
@@ -4694,11 +4703,12 @@ fun WatermarkAdjustmentBottomSheet(
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium
                         )
-                        Row(
+                        LazyRow(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(horizontal = 2.dp)
                         ) {
-                            listOf(24, 36, 48, 64, 96, 128).forEach { size ->
+                            items(listOf(24, 36, 48, 64, 96, 128)) { size ->
                                 FilterChip(
                                     selected = boxSize == size,
                                     onClick = { if (!autoDetect) onBoxSizeChange(size) },
@@ -4710,15 +4720,42 @@ fun WatermarkAdjustmentBottomSheet(
                     }
 
                     // VISUAL LIVE ROI PREVIEW WITH RED MASK OVERLAY
-                    if (roiBitmap != null) {
-                        Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
                         Text(
                             text = Strings.manualAdjustmentPreviewTitle(isVi),
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 8.dp)
                         )
+                        OutlinedButton(
+                            onClick = onPickTargetImage,
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.AddPhotoAlternate,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (targetImageUri == null) (if (isVi) "Thêm ảnh" else "Add image") else (if (isVi) "Đổi ảnh" else "Change"),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
 
+                    if (roiBitmap != null) {
                         val displaySizeDp = 200.dp
                         val displaySizePx = with(LocalDensity.current) { displaySizeDp.toPx() }
                         val scale = displaySizePx / roiSpan.toFloat()
@@ -4764,54 +4801,95 @@ fun WatermarkAdjustmentBottomSheet(
                                 )
                             }
                         }
+                    } else {
+                        // Empty preview placeholder card with pick image button
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { onPickTargetImage() },
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(20.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(
+                                    Icons.Default.AddPhotoAlternate,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = if (isVi) "Chưa có ảnh đích để xem trước" else "No target image to preview",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = if (isVi) "Bấm để chọn ảnh từ thư viện" else "Tap to select image from gallery",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
                 }
             }
 
-            // STICKY BOTTOM ACTION BAR
+            // STICKY BOTTOM ACTION BAR (Full solid background covering navigation bar)
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 4.dp,
                 shadowElevation = 8.dp
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .navigationBarsPadding()
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    OutlinedButton(
-                        onClick = {
-                            onOffsetXChange(0)
-                            onOffsetYChange(0)
-                            onBoxSizeChange(48)
-                            onAutoDetectChange(false)
-                            onReset()
-                        },
+                    Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp)
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(Strings.resetCustomPosBtn(isVi), fontSize = 13.sp)
-                    }
-                    Button(
-                        onClick = {
-                            onSave()
-                            onDismissRequest()
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp)
-                    ) {
-                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(Strings.saveCustomPosBtn(isVi), fontSize = 13.sp)
+                        OutlinedButton(
+                            onClick = {
+                                onOffsetXChange(0)
+                                onOffsetYChange(0)
+                                onBoxSizeChange(48)
+                                onAutoDetectChange(false)
+                                onReset()
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(44.dp)
+                        ) {
+                            Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(Strings.resetCustomPosBtn(isVi), fontSize = 13.sp)
+                        }
+                        Button(
+                            onClick = {
+                                onSave()
+                                onDismissRequest()
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(44.dp)
+                        ) {
+                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(Strings.saveCustomPosBtn(isVi), fontSize = 13.sp)
+                        }
                     }
                 }
             }
