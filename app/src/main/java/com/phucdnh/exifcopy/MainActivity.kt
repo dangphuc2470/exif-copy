@@ -397,6 +397,15 @@ fun MainScreen(
     var reverseAlphaAutoDetect by remember {
         mutableStateOf(prefs.getBoolean("saved_reverse_alpha_auto_detect", false))
     }
+    var customWatermarkOffsetX by remember {
+        mutableStateOf(prefs.getInt("saved_custom_watermark_offset_x", 0))
+    }
+    var customWatermarkOffsetY by remember {
+        mutableStateOf(prefs.getInt("saved_custom_watermark_offset_y", 0))
+    }
+    var customWatermarkSize by remember {
+        mutableStateOf(prefs.getInt("saved_custom_watermark_size", 48))
+    }
     var watermarkPreviewCache by remember {
         mutableStateOf<Map<GeminiWatermarkRemover.WatermarkMode, Bitmap>>(emptyMap())
     }
@@ -408,7 +417,15 @@ fun MainScreen(
     val currentTargetId = currentTargetItem?.id
     val currentTargetUri = currentTargetItem?.uri
 
-    LaunchedEffect(currentTargetId, autoPrecomputeWatermark, reverseAlphaAutoDetect, watermarkMode) {
+    LaunchedEffect(
+        currentTargetId,
+        autoPrecomputeWatermark,
+        reverseAlphaAutoDetect,
+        watermarkMode,
+        customWatermarkOffsetX,
+        customWatermarkOffsetY,
+        customWatermarkSize
+    ) {
         if (autoPrecomputeWatermark && currentTargetUri != null) {
             isPrecomputingPreviews = true
             watermarkPreviewCache = emptyMap()
@@ -417,7 +434,10 @@ fun MainScreen(
                     context = context,
                     imageUri = currentTargetUri,
                     autoDetectForReverseAlpha = reverseAlphaAutoDetect,
-                    preferredMode = watermarkMode
+                    preferredMode = watermarkMode,
+                    customOffsetX = customWatermarkOffsetX,
+                    customOffsetY = customWatermarkOffsetY,
+                    customSize = customWatermarkSize
                 )
                 withContext(Dispatchers.Main) {
                     watermarkPreviewCache = previews ?: emptyMap()
@@ -1066,6 +1086,37 @@ fun MainScreen(
                                     }
                                 }
 
+                                if (removeWatermark && !GeminiWatermarkRemover.isReverseAlphaMode(watermarkMode)) {
+                                    WatermarkAdjustmentCard(
+                                        offsetX = customWatermarkOffsetX,
+                                        onOffsetXChange = { customWatermarkOffsetX = it },
+                                        offsetY = customWatermarkOffsetY,
+                                        onOffsetYChange = { customWatermarkOffsetY = it },
+                                        boxSize = customWatermarkSize,
+                                        onBoxSizeChange = { customWatermarkSize = it },
+                                        onSave = {
+                                            prefs.edit()
+                                                .putInt("saved_custom_watermark_offset_x", customWatermarkOffsetX)
+                                                .putInt("saved_custom_watermark_offset_y", customWatermarkOffsetY)
+                                                .putInt("saved_custom_watermark_size", customWatermarkSize)
+                                                .apply()
+                                            Toast.makeText(context, Strings.savedCustomPosToast(isVi), Toast.LENGTH_SHORT).show()
+                                        },
+                                        onReset = {
+                                            customWatermarkOffsetX = 0
+                                            customWatermarkOffsetY = 0
+                                            customWatermarkSize = 48
+                                            prefs.edit()
+                                                .putInt("saved_custom_watermark_offset_x", 0)
+                                                .putInt("saved_custom_watermark_offset_y", 0)
+                                                .putInt("saved_custom_watermark_size", 48)
+                                                .apply()
+                                            Toast.makeText(context, Strings.resetCustomPosToast(isVi), Toast.LENGTH_SHORT).show()
+                                        },
+                                        isVi = isVi
+                                    )
+                                }
+
                                 // Upscale & Blend checkbox (same row below, or separate row)
                                 Row(
                                     modifier = Modifier
@@ -1153,7 +1204,10 @@ fun MainScreen(
                                                         replaceOriginal = false,
                                                         removeWatermark = removeWatermark,
                                                         watermarkMode = watermarkMode,
-                                                        upscaleBlend = upscaleBlend
+                                                        upscaleBlend = upscaleBlend,
+                                                        customOffsetX = customWatermarkOffsetX,
+                                                        customOffsetY = customWatermarkOffsetY,
+                                                        customSize = customWatermarkSize
                                                     )
                                                     if (outputUris.isNotEmpty()) {
                                                         successCount += outputUris.size
@@ -1398,6 +1452,37 @@ fun MainScreen(
                                     }
                                 }
 
+                                if (removeWatermark && !GeminiWatermarkRemover.isReverseAlphaMode(watermarkMode)) {
+                                    WatermarkAdjustmentCard(
+                                        offsetX = customWatermarkOffsetX,
+                                        onOffsetXChange = { customWatermarkOffsetX = it },
+                                        offsetY = customWatermarkOffsetY,
+                                        onOffsetYChange = { customWatermarkOffsetY = it },
+                                        boxSize = customWatermarkSize,
+                                        onBoxSizeChange = { customWatermarkSize = it },
+                                        onSave = {
+                                            prefs.edit()
+                                                .putInt("saved_custom_watermark_offset_x", customWatermarkOffsetX)
+                                                .putInt("saved_custom_watermark_offset_y", customWatermarkOffsetY)
+                                                .putInt("saved_custom_watermark_size", customWatermarkSize)
+                                                .apply()
+                                            Toast.makeText(context, Strings.savedCustomPosToast(isVi), Toast.LENGTH_SHORT).show()
+                                        },
+                                        onReset = {
+                                            customWatermarkOffsetX = 0
+                                            customWatermarkOffsetY = 0
+                                            customWatermarkSize = 48
+                                            prefs.edit()
+                                                .putInt("saved_custom_watermark_offset_x", 0)
+                                                .putInt("saved_custom_watermark_offset_y", 0)
+                                                .putInt("saved_custom_watermark_size", 48)
+                                                .apply()
+                                            Toast.makeText(context, Strings.resetCustomPosToast(isVi), Toast.LENGTH_SHORT).show()
+                                        },
+                                        isVi = isVi
+                                    )
+                                }
+
                                 // ACTION BUTTON (Full Width)
                                 Button(
                                     onClick = {
@@ -1429,7 +1514,10 @@ fun MainScreen(
                                                         watermarkMode = watermarkMode,
                                                         keepOriginalFileName = watermarkKeepFileName,
                                                         keepOriginalDateTime = watermarkKeepDateTime,
-                                                        autoDetectForReverseAlpha = reverseAlphaAutoDetect
+                                                        autoDetectForReverseAlpha = reverseAlphaAutoDetect,
+                                                        customOffsetX = customWatermarkOffsetX,
+                                                        customOffsetY = customWatermarkOffsetY,
+                                                        customSize = customWatermarkSize
                                                     )
                                                     if (outputUris.isNotEmpty()) {
                                                         successCount += outputUris.size
@@ -4329,6 +4417,168 @@ fun VisualBlendLoadingDialog(
                                 fontWeight = if (curStep == i) FontWeight.Bold else FontWeight.Normal,
                                 color = if (curStep == i) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = if (curStep > i) 0.8f else 0.5f)
                             )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun WatermarkAdjustmentCard(
+    offsetX: Int,
+    onOffsetXChange: (Int) -> Unit,
+    offsetY: Int,
+    onOffsetYChange: (Int) -> Unit,
+    boxSize: Int,
+    onBoxSizeChange: (Int) -> Unit,
+    onSave: () -> Unit,
+    onReset: () -> Unit,
+    isVi: Boolean
+) {
+    var isExpanded by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { isExpanded = !isExpanded },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.Tune,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = Strings.manualAdjustmentTitle(isVi),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                Icon(
+                    imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            AnimatedVisibility(visible = isExpanded) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = Strings.manualAdjustmentDesc(isVi),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    // Offset X Control
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = Strings.offsetXLabel(isVi, offsetX),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { onOffsetXChange(offsetX - 4) }, modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Default.Remove, contentDescription = "-4px", modifier = Modifier.size(16.dp))
+                            }
+                            Slider(
+                                value = offsetX.toFloat(),
+                                onValueChange = { onOffsetXChange(it.toInt()) },
+                                valueRange = -150f..150f,
+                                modifier = Modifier.width(130.dp)
+                            )
+                            IconButton(onClick = { onOffsetXChange(offsetX + 4) }, modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Default.Add, contentDescription = "+4px", modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+
+                    // Offset Y Control
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = Strings.offsetYLabel(isVi, offsetY),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { onOffsetYChange(offsetY - 4) }, modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Default.Remove, contentDescription = "-4px", modifier = Modifier.size(16.dp))
+                            }
+                            Slider(
+                                value = offsetY.toFloat(),
+                                onValueChange = { onOffsetYChange(it.toInt()) },
+                                valueRange = -150f..150f,
+                                modifier = Modifier.width(130.dp)
+                            )
+                            IconButton(onClick = { onOffsetYChange(offsetY + 4) }, modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Default.Add, contentDescription = "+4px", modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+
+                    // Box Size Chips
+                    Text(
+                        text = Strings.boxSizeLabel(isVi, boxSize),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(24, 36, 48, 64, 96, 128).forEach { size ->
+                            FilterChip(
+                                selected = boxSize == size,
+                                onClick = { onBoxSizeChange(size) },
+                                label = { Text("${size}px", fontSize = 11.sp) },
+                                modifier = Modifier.height(28.dp)
+                            )
+                        }
+                    }
+
+                    // Action buttons: Save & Reset
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        OutlinedButton(
+                            onClick = onReset,
+                            modifier = Modifier.height(32.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                        ) {
+                            Text(Strings.resetCustomPosBtn(isVi), fontSize = 11.sp)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = onSave,
+                            modifier = Modifier.height(32.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
+                        ) {
+                            Text(Strings.saveCustomPosBtn(isVi), fontSize = 11.sp)
                         }
                     }
                 }

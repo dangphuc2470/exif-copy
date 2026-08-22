@@ -241,7 +241,10 @@ object ExifMetadataHelper {
         file: File,
         mode: GeminiWatermarkRemover.WatermarkMode,
         context: Context,
-        autoDetectForReverseAlpha: Boolean = false
+        autoDetectForReverseAlpha: Boolean = false,
+        customOffsetX: Int = 0,
+        customOffsetY: Int = 0,
+        customSize: Int? = null
     ): Boolean {
         return try {
             val decodeOptions = BitmapFactory.Options().apply {
@@ -250,7 +253,7 @@ object ExifMetadataHelper {
                 inPremultiplied = false
             }
             val bitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOptions) ?: return false
-            val result = GeminiWatermarkRemover.processImage(bitmap, mode, autoDetectForReverseAlpha)
+            val result = GeminiWatermarkRemover.processImage(bitmap, mode, autoDetectForReverseAlpha, customOffsetX, customOffsetY, customSize)
             log(context, "Đã xử lý xóa watermark Gemini (${mode.displayName}, detected=${result.detected}, match=${result.match}).")
 
             val fileExt = file.extension
@@ -315,7 +318,10 @@ object ExifMetadataHelper {
         replaceOriginal: Boolean = false,
         removeWatermark: Boolean = false,
         watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA_AUG19,
-        upscaleBlend: Boolean = false
+        upscaleBlend: Boolean = false,
+        customOffsetX: Int = 0,
+        customOffsetY: Int = 0,
+        customSize: Int? = null
     ): List<Uri> {
         val savedUris = mutableListOf<Uri>()
         try {
@@ -635,7 +641,7 @@ object ExifMetadataHelper {
 
                 if (removeWatermark) {
                     val autoDetect = settings?.reverseAlphaAutoDetect ?: false
-                    applyWatermarkRemovalToFile(runTempFile, subMode, context, autoDetect)
+                    applyWatermarkRemovalToFile(runTempFile, subMode, context, autoDetect, customOffsetX, customOffsetY, customSize)
                 }
 
                 // Write properties to the temp file
@@ -851,12 +857,15 @@ object ExifMetadataHelper {
         watermarkMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA_AUG19,
         keepOriginalFileName: Boolean = false,
         keepOriginalDateTime: Boolean = false,
-        autoDetectForReverseAlpha: Boolean = false
+        autoDetectForReverseAlpha: Boolean = false,
+        customOffsetX: Int = 0,
+        customOffsetY: Int = 0,
+        customSize: Int? = null
     ): List<Uri> {
         val savedUris = mutableListOf<Uri>()
         try {
             log(context, "--- BẮT ĐẦU XÓA NHÃN AI (LIST) ---")
-            log(context, "Tùy chọn: KeepFileName=$keepOriginalFileName, KeepDateTime=$keepOriginalDateTime, AutoDetectRA=$autoDetectForReverseAlpha")
+            log(context, "Tùy chọn: KeepFileName=$keepOriginalFileName, KeepDateTime=$keepOriginalDateTime, AutoDetectRA=$autoDetectForReverseAlpha, CustomOffset=($customOffsetX, $customOffsetY), CustomSize=$customSize")
             val targetMimeType = getMimeTypeSafely(context, targetUri)
             val tempExt = when {
                 targetMimeType.contains("png", ignoreCase = true) -> ".png"
@@ -911,7 +920,7 @@ object ExifMetadataHelper {
                 tempFile.copyTo(runTempFile, overwrite = true)
 
                 if (removeWatermark) {
-                    applyWatermarkRemovalToFile(runTempFile, subMode, context, autoDetectForReverseAlpha)
+                    applyWatermarkRemovalToFile(runTempFile, subMode, context, autoDetectForReverseAlpha, customOffsetX, customOffsetY, customSize)
                 }
 
                 val exif = ExifInterface(runTempFile.absolutePath)

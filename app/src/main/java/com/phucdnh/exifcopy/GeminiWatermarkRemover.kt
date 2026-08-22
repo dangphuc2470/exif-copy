@@ -870,11 +870,12 @@ object GeminiWatermarkRemover {
     fun getFallbackMatch(width: Int, height: Int, mode: WatermarkMode): DetectionMatch {
         val longSide = max(width, height)
         val (fallbackSize, fallbackMargin) = when (mode) {
+            WatermarkMode.REVERSE_ALPHA_AUG19 -> Pair(48, 96)
             WatermarkMode.REVERSE_ALPHA_AUG13 -> if (longSide >= 1600) Pair(24, 64) else Pair(24, 32)
             WatermarkMode.REVERSE_ALPHA_V2_36 -> if (longSide >= 1600) Pair(36, 128) else Pair(36, 64)
             WatermarkMode.REVERSE_ALPHA_MAY20 -> if (longSide >= 1600) Pair(96, 192) else Pair(48, 96)
-            WatermarkMode.REVERSE_ALPHA_AUG19 -> if (longSide >= 1600) Pair(48, 96) else Pair(48, 32)
-            else -> if (longSide >= 1600) Pair(48, 96) else Pair(48, 32)
+            WatermarkMode.REVERSE_ALPHA_LEGACY -> if (longSide >= 1600) Pair(96, 64) else Pair(48, 32)
+            else -> Pair(48, 96)
         }
         val fbX = (width - fallbackMargin - fallbackSize).coerceIn(0, width - fallbackSize)
         val fbY = (height - fallbackMargin - fallbackSize).coerceIn(0, height - fallbackSize)
@@ -892,36 +893,51 @@ object GeminiWatermarkRemover {
     fun findWatermarkTarget(
         bitmap: Bitmap,
         mode: WatermarkMode,
-        autoDetectForReverseAlpha: Boolean = false
+        autoDetectForReverseAlpha: Boolean = false,
+        customOffsetX: Int = 0,
+        customOffsetY: Int = 0,
+        customSize: Int? = null
     ): DetectionMatch {
-        if (isReverseAlphaMode(mode) && !autoDetectForReverseAlpha) {
-            return getFallbackMatch(bitmap.width, bitmap.height, mode)
-        }
-        val targetSizes = when (mode) {
-            WatermarkMode.REVERSE_ALPHA_AUG13 -> intArrayOf(24)
-            WatermarkMode.REVERSE_ALPHA_AUG19 -> intArrayOf(48, 96)
-            WatermarkMode.REVERSE_ALPHA_V2_36 -> intArrayOf(36)
-            WatermarkMode.REVERSE_ALPHA_MAY20 -> intArrayOf(96)
-            WatermarkMode.REVERSE_ALPHA_LEGACY -> intArrayOf(96, 48)
-            else -> null
-        }
-        val match = findWatermarkMatch(bitmap, targetSizes)
-        return if (match != null && match.score >= 0.08f) {
-            match
-        } else {
+        val baseMatch = if (isReverseAlphaMode(mode) && !autoDetectForReverseAlpha) {
             getFallbackMatch(bitmap.width, bitmap.height, mode)
+        } else {
+            val targetSizes = when (mode) {
+                WatermarkMode.REVERSE_ALPHA_AUG13 -> intArrayOf(24)
+                WatermarkMode.REVERSE_ALPHA_AUG19 -> intArrayOf(48, 96)
+                WatermarkMode.REVERSE_ALPHA_V2_36 -> intArrayOf(36)
+                WatermarkMode.REVERSE_ALPHA_MAY20 -> intArrayOf(96)
+                WatermarkMode.REVERSE_ALPHA_LEGACY -> intArrayOf(96, 48)
+                else -> if (customSize != null) intArrayOf(customSize) else null
+            }
+            val match = findWatermarkMatch(bitmap, targetSizes)
+            if (match != null && match.score >= 0.08f) {
+                match
+            } else {
+                getFallbackMatch(bitmap.width, bitmap.height, mode)
+            }
         }
+
+        if (!isReverseAlphaMode(mode) && (customOffsetX != 0 || customOffsetY != 0 || customSize != null)) {
+            val finalSize = (customSize ?: baseMatch.width).coerceIn(16, min(bitmap.width, bitmap.height))
+            val finalX = (baseMatch.x + customOffsetX).coerceIn(0, bitmap.width - finalSize)
+            val finalY = (baseMatch.y + customOffsetY).coerceIn(0, bitmap.height - finalSize)
+            return DetectionMatch(finalX, finalY, finalSize, finalSize, baseMatch.score, "Custom_${finalSize}")
+        }
+        return baseMatch
     }
 
     fun processImage(
         bitmap: Bitmap,
         mode: WatermarkMode = WatermarkMode.AI_MODEL,
-        autoDetectForReverseAlpha: Boolean = false
+        autoDetectForReverseAlpha: Boolean = false,
+        customOffsetX: Int = 0,
+        customOffsetY: Int = 0,
+        customSize: Int? = null
     ): RemovalResult {
         val width = bitmap.width
         val height = bitmap.height
 
-        val targetMatch = findWatermarkTarget(bitmap, mode, autoDetectForReverseAlpha)
+        val targetMatch = findWatermarkTarget(bitmap, mode, autoDetectForReverseAlpha, customOffsetX, customOffsetY, customSize)
 
         val pixels = IntArray(width * height)
         bitmap.getPixels(pixels, 0, width, 0, 0, width, height)

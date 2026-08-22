@@ -206,7 +206,10 @@ object WatermarkTimelineHelper {
         context: Context,
         imageUri: android.net.Uri,
         autoDetectForReverseAlpha: Boolean = false,
-        preferredMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA_AUG19
+        preferredMode: GeminiWatermarkRemover.WatermarkMode = GeminiWatermarkRemover.WatermarkMode.REVERSE_ALPHA_AUG19,
+        customOffsetX: Int = 0,
+        customOffsetY: Int = 0,
+        customSize: Int? = null
     ): Map<GeminiWatermarkRemover.WatermarkMode, Bitmap>? {
         return try {
             val opts = BitmapFactory.Options().apply {
@@ -235,7 +238,7 @@ object WatermarkTimelineHelper {
             } else {
                 detectedMatch = null
                 val longSide = kotlin.math.max(w, h)
-                val cropSpan = if (longSide >= 1600) 360 else 240
+                val cropSpan = if (longSide >= 1600) 480 else 280
                 cropX = (w - cropSpan).coerceIn(0, w - 1)
                 cropY = (h - cropSpan).coerceIn(0, h - 1)
                 cropW = (w - cropX).coerceAtLeast(60)
@@ -255,10 +258,19 @@ object WatermarkTimelineHelper {
 
             for (mode in modesToCompute) {
                 try {
-                    val modeTarget = if (detectedMatch != null && detectedMatch.score >= 0.08f) {
+                    val baseTarget = if (detectedMatch != null && detectedMatch.score >= 0.08f) {
                         detectedMatch
                     } else {
                         GeminiWatermarkRemover.getFallbackMatch(w, h, mode)
+                    }
+
+                    val modeTarget = if (!GeminiWatermarkRemover.isReverseAlphaMode(mode) && (customOffsetX != 0 || customOffsetY != 0 || customSize != null)) {
+                        val finalSize = (customSize ?: baseTarget.width).coerceIn(16, kotlin.math.min(w, h))
+                        val finalX = (baseTarget.x + customOffsetX).coerceIn(0, w - finalSize)
+                        val finalY = (baseTarget.y + customOffsetY).coerceIn(0, h - finalSize)
+                        GeminiWatermarkRemover.DetectionMatch(finalX, finalY, finalSize, finalSize, baseTarget.score, "Custom_${finalSize}")
+                    } else {
+                        baseTarget
                     }
 
                     val cropped = GeminiWatermarkRemover.processCroppedRoi(
