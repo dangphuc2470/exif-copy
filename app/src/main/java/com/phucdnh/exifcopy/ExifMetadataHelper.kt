@@ -1298,6 +1298,42 @@ object ExifMetadataHelper {
         return null
     }
 
+    fun injectParsedDateIntoFileName(rawFileName: String, parsedDate: Date): String {
+        val baseName = getBaseName(rawFileName)
+        val dateFmt = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
+        val newFormattedDate = dateFmt.format(parsedDate)
+
+        // 1. Match full timestamp format like yyyyMMdd_HHmmss, yyyyMMdd-HHmmss, or yyyyMMddTHHmmss
+        val fullDateTimeRegex = """(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])[_\-T]\d{6}(\.\d{1,3})?""".toRegex()
+        if (fullDateTimeRegex.containsMatchIn(baseName)) {
+            return baseName.replace(fullDateTimeRegex, newFormattedDate)
+        }
+
+        // 2. Match separated date-time like yyyy-MM-dd-HH-mm-ss or yyyy_MM_dd_HH_mm_ss
+        val separatedDateTimeRegex = """(19|20)\d{2}[_\-](0[1-9]|1[0-2])[_\-](0[1-9]|[12]\d|3[01])[_\-]\d{2}[_\-]\d{2}[_\-]\d{2}""".toRegex()
+        if (separatedDateTimeRegex.containsMatchIn(baseName)) {
+            val dashDateFmt = SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", Locale.US)
+            return baseName.replace(separatedDateTimeRegex, dashDateFmt.format(parsedDate))
+        }
+
+        // 3. Match 8-digit date like yyyyMMdd (e.g. DSC_20240822_001)
+        val dateOnlyRegex = """(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])""".toRegex()
+        if (dateOnlyRegex.containsMatchIn(baseName)) {
+            return baseName.replace(dateOnlyRegex, newFormattedDate)
+        }
+
+        // 4. Match common camera / screenshot prefixes (PXL_, IMG_, DSC_, SAM_, PHOTO_, Screenshot_, etc.)
+        val prefixRegex = """^((?:clean_)?[A-Za-z0-9]+[_\-])(.+)$""".toRegex()
+        val match = prefixRegex.find(baseName)
+        if (match != null) {
+            val prefix = match.groupValues[1]
+            return "$prefix$newFormattedDate"
+        }
+
+        // 5. Fallback for generic names without prefix/date: keep original name
+        return baseName
+    }
+
     fun generateFormattedFileName(
         context: Context,
         exifDateTime: String?,
@@ -1307,8 +1343,7 @@ object ExifMetadataHelper {
     ): String {
         val parsedDate = parseExifDateFlexible(exifDateTime)
         val baseName = if (parsedDate != null) {
-            val dateFmt = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
-            "IMG_${dateFmt.format(parsedDate)}"
+            injectParsedDateIntoFileName(fallbackOriginalName, parsedDate)
         } else {
             getBaseName(fallbackOriginalName)
         }
