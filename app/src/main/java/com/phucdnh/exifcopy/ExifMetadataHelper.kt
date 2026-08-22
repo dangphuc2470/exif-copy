@@ -1298,39 +1298,60 @@ object ExifMetadataHelper {
         return null
     }
 
+    private fun injectDigitsPreservingNonDigits(template: String, digitSource: String): String {
+        val sb = StringBuilder()
+        var digitIndex = 0
+        for (ch in template) {
+            if (ch.isDigit() && digitIndex < digitSource.length) {
+                sb.append(digitSource[digitIndex])
+                digitIndex++
+            } else {
+                sb.append(ch)
+            }
+        }
+        return sb.toString()
+    }
+
     fun injectParsedDateIntoFileName(rawFileName: String, parsedDate: Date): String {
         val baseName = getBaseName(rawFileName)
-        val dateFmt = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
-        val newFormattedDate = dateFmt.format(parsedDate)
+        val full14Digits = SimpleDateFormat("yyyyMMddHHmmss", Locale.US).format(parsedDate)
+        val date8Digits = SimpleDateFormat("yyyyMMdd", Locale.US).format(parsedDate)
 
-        // 1. Match full timestamp format like yyyyMMdd_HHmmss, yyyyMMdd-HHmmss, or yyyyMMddTHHmmss
-        val fullDateTimeRegex = """(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])[_\-T]\d{6}(\.\d{1,3})?""".toRegex()
-        if (fullDateTimeRegex.containsMatchIn(baseName)) {
-            return baseName.replace(fullDateTimeRegex, newFormattedDate)
+        // 1. Match full timestamp block with arbitrary non-digit separators
+        // Matches year (19xx/20xx), month, day, and 6 digits of time (hour, min, sec) with any delimiter (-, _, ., T, :, space)
+        val fullTimestampRegex = """(19|20)\d{2}[_\-.]?(0[1-9]|1[0-2])[_\-.]?(0[1-9]|[12]\d|3[01])[_\-T. ]?\d{2}[_\-.:]?\d{2}[_\-.:]?\d{2}""".toRegex()
+        val fullMatch = fullTimestampRegex.find(baseName)
+        if (fullMatch != null) {
+            val matchedSegment = fullMatch.value
+            val digitCount = matchedSegment.count { it.isDigit() }
+            if (digitCount == 14) {
+                val replacedSegment = injectDigitsPreservingNonDigits(matchedSegment, full14Digits)
+                return baseName.replaceRange(fullMatch.range, replacedSegment)
+            }
         }
 
-        // 2. Match separated date-time like yyyy-MM-dd-HH-mm-ss or yyyy_MM_dd_HH_mm_ss
-        val separatedDateTimeRegex = """(19|20)\d{2}[_\-](0[1-9]|1[0-2])[_\-](0[1-9]|[12]\d|3[01])[_\-]\d{2}[_\-]\d{2}[_\-]\d{2}""".toRegex()
-        if (separatedDateTimeRegex.containsMatchIn(baseName)) {
-            val dashDateFmt = SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", Locale.US)
-            return baseName.replace(separatedDateTimeRegex, dashDateFmt.format(parsedDate))
+        // 2. Match 8-digit date block with separators (e.g. 2024-05-01, 2024_05_01, 20240501)
+        val dateOnlyRegex = """(19|20)\d{2}[_\-.]?(0[1-9]|1[0-2])[_\-.]?(0[1-9]|[12]\d|3[01])""".toRegex()
+        val dateMatch = dateOnlyRegex.find(baseName)
+        if (dateMatch != null) {
+            val matchedSegment = dateMatch.value
+            val digitCount = matchedSegment.count { it.isDigit() }
+            if (digitCount == 8) {
+                val replacedSegment = injectDigitsPreservingNonDigits(matchedSegment, date8Digits)
+                return baseName.replaceRange(dateMatch.range, replacedSegment)
+            }
         }
 
-        // 3. Match 8-digit date like yyyyMMdd (e.g. DSC_20240822_001)
-        val dateOnlyRegex = """(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])""".toRegex()
-        if (dateOnlyRegex.containsMatchIn(baseName)) {
-            return baseName.replace(dateOnlyRegex, newFormattedDate)
-        }
-
-        // 4. Match common camera / screenshot prefixes (PXL_, IMG_, DSC_, SAM_, PHOTO_, Screenshot_, etc.)
+        // 3. Match common camera / screenshot prefixes (PXL_, IMG_, DSC_, SAM_, PHOTO_, Screenshot_, etc.)
         val prefixRegex = """^((?:clean_)?[A-Za-z0-9]+[_\-])(.+)$""".toRegex()
-        val match = prefixRegex.find(baseName)
-        if (match != null) {
-            val prefix = match.groupValues[1]
-            return "$prefix$newFormattedDate"
+        val prefixMatch = prefixRegex.find(baseName)
+        if (prefixMatch != null) {
+            val prefix = prefixMatch.groupValues[1]
+            val standard14WithSep = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(parsedDate)
+            return "$prefix$standard14WithSep"
         }
 
-        // 5. Fallback for generic names without prefix/date: keep original name
+        // 4. Fallback for generic names without prefix/date: keep original base name
         return baseName
     }
 
