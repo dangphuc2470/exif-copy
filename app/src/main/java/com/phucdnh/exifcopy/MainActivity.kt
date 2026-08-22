@@ -409,8 +409,8 @@ fun MainScreen(
     var customWatermarkAutoDetect by remember {
         mutableStateOf(prefs.getBoolean("saved_custom_watermark_auto_detect", false))
     }
-    var showWatermarkAdjustment by remember {
-        mutableStateOf(prefs.getBoolean("saved_show_watermark_adjustment", true))
+    var watermarkAutoDetect by remember {
+        mutableStateOf(prefs.getBoolean("saved_watermark_auto_detect", true))
     }
     var showWatermarkAdjustmentSheet by remember {
         mutableStateOf(false)
@@ -435,13 +435,13 @@ fun MainScreen(
         customWatermarkOffsetY,
         customWatermarkSize,
         customWatermarkAutoDetect,
-        showWatermarkAdjustment
+        watermarkAutoDetect
     ) {
         if (autoPrecomputeWatermark && currentTargetUri != null) {
             isPrecomputingPreviews = true
             watermarkPreviewCache = emptyMap()
             withContext(Dispatchers.IO) {
-                val effAutoDetect = if (!showWatermarkAdjustment) true else customWatermarkAutoDetect
+                val effAutoDetect = if (watermarkAutoDetect) true else customWatermarkAutoDetect
                 val effOffsetX = if (effAutoDetect) 0 else customWatermarkOffsetX
                 val effOffsetY = if (effAutoDetect) 0 else customWatermarkOffsetY
                 val effSize = if (effAutoDetect) null else customWatermarkSize
@@ -1098,7 +1098,7 @@ fun MainScreen(
                                             isComputing = isPrecomputingPreviews,
                                             modifier = Modifier.weight(1f, fill = false)
                                         )
-                                        if (showWatermarkAdjustment && !GeminiWatermarkRemover.isReverseAlphaMode(watermarkMode)) {
+                                        if (!watermarkAutoDetect && !GeminiWatermarkRemover.isReverseAlphaMode(watermarkMode)) {
                                             Spacer(modifier = Modifier.width(4.dp))
                                             IconButton(
                                                 onClick = { showWatermarkAdjustmentSheet = true },
@@ -1193,7 +1193,7 @@ fun MainScreen(
                                                     }
 
                                                     val activeSettings = exifSettings
-                                                    val effAutoDetect = if (!showWatermarkAdjustment) true else customWatermarkAutoDetect
+                                                    val effAutoDetect = if (watermarkAutoDetect) true else customWatermarkAutoDetect
                                                     val effOffsetX = if (effAutoDetect) 0 else customWatermarkOffsetX
                                                     val effOffsetY = if (effAutoDetect) 0 else customWatermarkOffsetY
                                                     val effSize = if (effAutoDetect) null else customWatermarkSize
@@ -1452,7 +1452,7 @@ fun MainScreen(
                                             isComputing = isPrecomputingPreviews,
                                             modifier = Modifier.weight(1f, fill = false)
                                         )
-                                        if (showWatermarkAdjustment && !GeminiWatermarkRemover.isReverseAlphaMode(watermarkMode)) {
+                                        if (!watermarkAutoDetect && !GeminiWatermarkRemover.isReverseAlphaMode(watermarkMode)) {
                                             Spacer(modifier = Modifier.width(4.dp))
                                             IconButton(
                                                 onClick = { showWatermarkAdjustmentSheet = true },
@@ -1492,7 +1492,7 @@ fun MainScreen(
                                             withContext(Dispatchers.IO) {
                                                 for (i in targetCopy.indices) {
                                                     val targetItem = targetCopy[i]
-                                                    val effAutoDetect = if (!showWatermarkAdjustment) true else customWatermarkAutoDetect
+                                                    val effAutoDetect = if (watermarkAutoDetect) true else customWatermarkAutoDetect
                                                     val effOffsetX = if (effAutoDetect) 0 else customWatermarkOffsetX
                                                     val effOffsetY = if (effAutoDetect) 0 else customWatermarkOffsetY
                                                     val effSize = if (effAutoDetect) null else customWatermarkSize
@@ -2094,10 +2094,10 @@ fun MainScreen(
                                     reverseAlphaAutoDetect = enabled
                                     prefs.edit().putBoolean("saved_reverse_alpha_auto_detect", enabled).apply()
                                 },
-                                showWatermarkAdjustment = showWatermarkAdjustment,
-                                onToggleShowWatermarkAdjustment = { enabled ->
-                                    showWatermarkAdjustment = enabled
-                                    prefs.edit().putBoolean("saved_show_watermark_adjustment", enabled).apply()
+                                watermarkAutoDetect = watermarkAutoDetect,
+                                onToggleWatermarkAutoDetect = { enabled ->
+                                    watermarkAutoDetect = enabled
+                                    prefs.edit().putBoolean("saved_watermark_auto_detect", enabled).apply()
                                 },
                                 onOpenExifSettings = { showSettingsDialog = true },
                                 isVi = isVi
@@ -3289,8 +3289,8 @@ fun SettingsTabScreen(
     onToggleWatermarkKeepDateTime: (Boolean) -> Unit,
     reverseAlphaAutoDetect: Boolean,
     onToggleReverseAlphaAutoDetect: (Boolean) -> Unit,
-    showWatermarkAdjustment: Boolean,
-    onToggleShowWatermarkAdjustment: (Boolean) -> Unit,
+    watermarkAutoDetect: Boolean,
+    onToggleWatermarkAutoDetect: (Boolean) -> Unit,
     onOpenExifSettings: () -> Unit,
     isVi: Boolean
 ) {
@@ -3689,7 +3689,7 @@ fun SettingsTabScreen(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Toggle 4: Show Watermark Region Adjustment Card
+                // Toggle 4: Auto-detect Watermark Position (Hide manual adjustment button when ON)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -3697,20 +3697,20 @@ fun SettingsTabScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                         Text(
-                            text = Strings.showWatermarkAdjustmentTitle(isVi),
+                            text = Strings.watermarkAutoDetectTitle(isVi),
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = Strings.showWatermarkAdjustmentDesc(isVi),
+                            text = Strings.watermarkAutoDetectDesc(isVi),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     Switch(
-                        checked = showWatermarkAdjustment,
-                        onCheckedChange = onToggleShowWatermarkAdjustment
+                        checked = watermarkAutoDetect,
+                        onCheckedChange = onToggleWatermarkAutoDetect
                     )
                 }
             }
