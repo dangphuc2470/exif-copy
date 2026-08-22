@@ -4813,7 +4813,7 @@ fun WatermarkAdjustmentCard(
                         }
                     }
 
-                    // Action buttons: Save & Reset
+                    // Action buttons: Save & Reset to Auto Pos
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -4821,10 +4821,18 @@ fun WatermarkAdjustmentCard(
                         horizontalArrangement = Arrangement.End
                     ) {
                         OutlinedButton(
-                            onClick = onReset,
+                            onClick = {
+                                onOffsetXChange(0)
+                                onOffsetYChange(0)
+                                onBoxSizeChange(48)
+                                onAutoDetectChange(false)
+                                onReset()
+                            },
                             modifier = Modifier.height(32.dp),
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                         ) {
+                            Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(Strings.resetCustomPosBtn(isVi), fontSize = 11.sp)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
